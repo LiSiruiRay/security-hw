@@ -1,0 +1,174 @@
+Chapter 8: Asymmetric cryptography: RSA, and factoring assumptions
+Suggest reading:
+	•	Security Engineering Chapters 5.3.4, 5.7.1
+	•	Basic number theory fact sheet: Arithmetic modulo composites
+Bonus reading:
+	•	Factoring Google's DKIM (email-signing) key
+	•	Detecting repeated factors in RSA moduli
+	•	The ROBOT attack
+	•	NIST Post-Quantum Cryptography
+Advanced crypto reading:
+	•	GCAC Chapter 13 (digital signatures)
+	•	Integer factoring
+	•	Twenty years of attacks on the RSA Cryptosystem
+	•	The RSA Problem
+
+We’ve seen how to build public-key encryption and digital signatures based on the Discrete Log problem. It turns out we can build both of these primitives as well from a different mathematical assumption: the difficulty of factoring.
+
+The resulting signature scheme and encryption scheme are closely related, and both are called simply RSA (after its inventors Rivest, Shamir and Adelman). RSA relies on factoring, or more specifically on the difficulty of computing roots modulo a large composite number whose prime factors are unknown. 
+
+The resulting schemes are simpler to understand and more elegant than discrete-log based schemes. Unfortunately, both RSA encryption and signing are less efficient (particularly when compared with elliptic curve implementations) and as a result both are quickly disappearing from widespread use. But they are an essential part of the history of asymmetric cryptography, and components of them are still used in some cryptographic systems due to the unique properties that can be achieved.
+RSA Signatures
+RSA Signatures work as follows:
+
+	•	KeyGen(λ): 
+	•	Generates two large prime numbers, p and q. For higher security, larger primes are chosen.
+	•	Compute their product, N=pq
+	•	Compute φ(N) = (p-1)(q-1)
+	•	Generate two values e and d such that ed ≡ 1 (mod φ(N)). That is, for some integer w we have ed = w · φ(N) + 1 
+	•	kpub = (N, e)
+	•	kpriv = d
+	•	Sign(kpriv, m) → md (mod N)
+	•	Verify(kpub, m, σ) → σe ≟ m (mod N)
+
+Note that while key generation takes a few lines to describe, signing and verification is simple and elegant. The key is the function φ(N), called Euler’s totient function. This function counts the number of integers between 1 and N which are coprime with N. Importantly,  Euler’s Theorem states that xφ(N) ≡ 1 (mod N) for any x, N which are relatively prime. Note that e and d were carefully chosen to take advantage of this property to cancel each other out. Since ed ≡ 1 (mod φ(N)), this ensures:
+
+		σe ≡ (md)e ≡ mde ≡ mw·φ(N) + 1 ≡ (mφ(N))w  · m ≡ (1)w  · m ≡ m
+
+What happens if we get unlucky and choose a message which is not relatively prime with N? Since the only factors of N are p and q, both of which are very large (hundreds of bits long at least), the odds of randomly picking a multiple of either one are negligible. If that happened, it would actually break the security of the scheme.
+RSA security & assumptions
+Why are RSA signatures secure, or more specifically why can’t an adversary create forgeries? The basic RSA problem is to compute roots modulo N when N is an RSA number (a number chosen as the product of two large primes).
+
+Given: large RSA number N, exponent e ≥ 3, random message 1 < m < N
+Compute: σ such that σe ≡ m (mod N)
+
+The RSA assumption states that this problem is intractable for suitably large N. Note that this is almost, but not quite a direct proof of unforgeability for RSA signatures. We’ll return to that below.
+
+We know that the RSA problem is easy to solve given φ(N), so the RSA problem reduces to the Euler’s totient problem:
+
+Given: large number N
+Compute: φ(N)  (that is, the number of integers in [1, N] which are relatively prime to N)
+
+This problem is centuries old, and generally there are no efficient algorithms known which don’t utilize the factorization of N. In fact, for RSA numbers which are specifically a product of two primes, this problem is provably equivalent to the Factoring problem:
+
+Given: large number N
+Compute: the prime factors of N
+
+We know that every positive integer has a unique prime factorization due to the Fundamental Theorem of Arithmetic. Finding the prime factorization is believed to be difficult in general, despite centuries of mathematics research.
+
+It remains unknown if solving the RSA problem fundamentally requires efficient factoring. So far, we don’t know of any better way of solving the RSA problem. This gives us a hierarchy of two mathematical assumptions for RSA:
+
+Strong RSA assumption ⇒ RSA assumption ⇒ Factoring assumption
+
+Of more practical interest to cryptographers is slow improvements in the size of RSA numbers which can be factored. The creators of RSA released a list of RSA numbers in 1991 as a public challenge, after almost thirty years the largest number publicly factored is a 768-bit number. For many years 1024-bit RSA numbers were used as public keys. These are now considered potentially vulnerable and 2048-bit numbers are the recommended minimum, with 3072- and 4096-bit numbers becoming more common.
+
+With RSA signing, the signature is the size of N, so larger moduli mean larger signatures (which are also slower to compute and verify). For this reason, RSA is no longer the dominant signature algorithm, being replaced by discrete-log based signatures in elliptic curve groups which offer much smaller signatures (and faster signing time).
+
+Choice of e: Traditionally the “public exponent” e is chosen to be 3. Note that e must be relatively prime to φ(N), so this choice requires primes which are equal to 2 (mod 3). This choice is convenient as it makes signature verification relatively fast (simply cubing a number mod N), though it introduces a few security complexities. Another popular choice is 65537 (216 + 1) which also enables relatively fast computation as its binary representation is very sparse.
+Signatures in practice: hashing and padding
+The simple version of RSA we presented above, with messages encoded as integers, is not unforgeable. Consider an adversary who learns (m, σ). They can produce the forgery (m·Δe, σ·Δ) for any coefficient Δ. Check to see that this signature will still verify.
+
+Even worse, the adversary can take a random value r, compute re, and output (re, r) as a message/signature pair. While they cannot sign an arbitrary message, they can take an arbitrary signature and compute its message (which will be pseudorandom).
+
+Clearly more work is needed. There is also a similar problem to that we saw for El Gamal encryption-who wants to sign an integer between 1 and N? Typically we want to sign arbitrary data, sometimes a lot of it (like a computer program that may be many megabytes long). We could encode this as many integers, but that would require many signature operations which are relatively slow.
+
+In practice, we almost never sign a message directly but instead sign the hash of the message. If the hash function is collision-resistant, then signing a message’s hash maintains unforgeability, because it’s impossible to find a different message with the same hash. This immediately fixes the length/format issues. It also prevents signature malleability, if verification includes checking that the signer knows the hash-preimage of the signed value. Trying to forge the signature of an arbitrary number like (re, r) will not verify, since the attacker will not know the value m for which H(m) = re.
+
+Finally, hashing-and-signing is also much more efficient: Since a hash function outputs a fixed-size digest for an input of any length we can sign an arbitrary length message with a single signature operation. Similar to hybrid encryption, we want to do the minimum amount of asymmetric crypto possible and rely on fast symmetric operations to process the bulk of the data.
+RSA encryption
+We saw how to construct public-key encryption based on the hardness of the discrete log problem (the El Gamal scheme). It’s also possible to encrypt using RSA assumptions. In fact this was the first asymmetric encryption scheme published (though it was published after Diffie-Hellman key exchange). Like RSA signing, it is elegant:
+
+	•	KeyGen(λ): 
+	•	(Exactly as for RSA signature scheme above)
+	•	kpub = (N, e)
+	•	kpriv = d
+	•	Encrypt(kpub, m) → me (mod N)
+	•	Decrypt(kpriv, c) → cd (mod N)
+
+Just as before, the fact that e,d are chosen so that xed ≡  x (mod N) for all x ensures that encryption is reversible. Encryption is just the reverse of signing: the message is raised to the public exponent, which yields a pseudorandom integer mod N, and the private exponent d can be used to “undo” this exponentiation and recover the message.
+
+Achieving semantic security via padding: You might note that as presented above, this encryption scheme cannot be semantically secure since it is not randomized. There are also many weak messages. For example, if e=3 then encryption is simply cubing mod N. But if m<N1/3, then this cube root can be computed over the integers.
+
+As a result, before encryption the message should always be padded with some random values. This is somewhat tricky to do correctly. Famously, the first public standard for RSA encryption padding (PKCS #1 v1) was broken by an attack that could leak a web server’s private RSA key one bit at a time through adaptive chosen ciphertext queries. Many web servers were still vulnerable to a variant of the attack discovered in 2017. Modern padding standards (e.g. OAEP) fix this problem. The lesson, as always, is that cryptography is very tricky to implement so one should always favor standard libraries.
+
+Hybrid encryption: The same note applies for RSA encryption as for any other public-key encryption scheme. For performance reasons it is almost always used only to encrypt a key, and symmetric authenticated encryption is then used.
+
+Sharing keys for encryption and signing? You might note that the key generation algorithm is identical for RSA signing and encryption. This leads to a natural question: can Alice just run the algorithm once and produce a single public key, which she can use to sign messages or to have others send encrypted messages to her?
+
+This is considered bad security practice for a simple reason: signing is the inverse of encryption! If Alice can be tricked into “signing” a message which an adversary controls, this is effectively a decryption oracle. In general, cryptographic keys should only be used for one purpose, a principle called key separation. We already saw a version of this with authenticated encryption, where one should always use separate keys for encryption and computing MACs.
+Post-quantum crypto
+Quantum computers are a major long-term threat facing public-key cryptography. Both the discrete log problem and factoring problem could be efficiently solved using Shor’s algorithm if quantum computers were built at scale. Notice that these are the hardest two problems underlying all of the schemes presented so far, so every algorithm would be completely insecure.
+
+While quantum computers don’t exist today, this is a major research area. They could exist in 5-10 years in the most optimistic of timelines. It could also take decades, or we could discover new phenomena in quantum physics preventing them from ever being practical. The stakes are much higher for encryption than signing: if a signature algorithm is broken, it’s enough if everybody knows to stop accepting new signatures from an old public key. If an encryption algorithm is broken, old ciphertexts can be decrypted. This is a problem for governments which try to keep classified information secret for decades.
+
+Many cryptographers today are focusing on the goal of developing post-quantum cryptography (or quantum-safe cryptography) which is still secure against attackers with quantum computers. The hope is to deploy these algorithms long before quantum computers exist.
+
+First, the good news: none of the symmetric algorithms we’ve discussed (hash functions, block ciphers, etc.) rely on assumptions that we know how to break using quantum computers. They are still vulnerable to Grover’s algorithm, a generic quantum search algorithm, but that only reduces an O(N) search to O(√N). This is easy enough to fix by simply using keys with twice as many bits.
+
+Hash-based signatures can also be implemented based solely on a collision-resistant hash function. These schemes are much less efficient, producing signatures that are typically tens of kilobytes long, but they are well understood.
+
+There are many proposals for cryptographic schemes based on mathematical problems that are believed to be hard even for a quantum computer, most prominently lattice-based cryptography using the “learning with errors” (LWE) problem and others. Much like NIST ran competitions to select the AES and SHA3 standards, there is an ongoing competition to standardize new post-quantum cryptographic algorithms.
+Crypto primitives summary
+That’s it for cryptographic primitives in this class, although cryptography is a deep field with many fascinating algorithms we won’t get a chance to discuss. There are fancier versions of the primitives we learned, such as fully homomorphic encryption and group signature schemes. There are also different primitives entirely, such as zero-knowledge proofs of knowledge, secure multiparty computation or verifiable delay functions.
+
+The cheat sheet for algorithms we discussed is:
+
+Hashing
+MD5, SHA1, SHA2 [SHA256, SHA512], SHA3
+  
+Symmetric key
+Public-key
+
+
+Confidentiality
+Symmetric encryption
+Public-key encryption
+
+Stream ciphers
+Block ciphers
+Factoring-based
+DL-based
+
+RC4
+ChaCha20
+AES-CTR
+DES
+AES
+RSA encryption
+El Gamal
+Cramer-Shoup
+
+
+Integrity
+Message authentication code (MAC)
+
+HMAC
+Digital signature
+
+
+ Factoring-based
+DL-based
+
+
+RSA signing
+Schnorr
+DSA
+BLS
+Conf. + Integrity
+Authenticated encryption
+Encrypt then MAC
+Galois-counter mode (GCM)
+Signcryption
+not discussed
+The Golden Rule of Cryptography
+We’ve hinted at it a few times in class but it’s worth stating again: cryptography is very tricky! Designing new primitives is a process that takes years of work and many subtle design flaws are found only after decades of analysis. The implications are:
+	•	Whenever possible, don’t design your own cryptographic primitives. And it should almost always be possible to select from the table above. The security field is littered with broken products from companies poorly re-engineering their own cryptography, in particular with symmetric primitives.
+	•	Whenever possible, don’t implement cryptographic primitives. Implementing these primitives correctly and securely is also extremely error-prone. By all means, do it as a learning project. But don’t implement them for new production systems unless absolutely necessary (e.g. using a new language) and if doing so, get reviews by experienced cryptographers.
+
+This cartoon by Jeff Moser sums it up:
+ 
+
+Is cryptography boring? It can be a little disappointing to be shown some details about modern cryptography for the first time then warned not to try it yourself. Does that mean cryptography is a boring area of computer science? It’s true that the pace of change is relatively slow for cryptographic primitives. AES and SHA2 are now over 20 years old. The idea of a Diffie-Hellman exchange is 40 years old.
+
+Yet cryptography is still a very active and exciting research area. Most current research is on new applications that can benefit from cryptography. A few cryptographers are working on next-generation hash functions, but more are working on problems like digital currencies or verifiable elections that require cryptography. It’s essential to understand the design properties and limitations of cryptographic primitives so that you can correctly use them to solve real security problems.
+

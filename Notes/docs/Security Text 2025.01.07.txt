@@ -1,0 +1,213 @@
+Chapter 7: Asymmetric cryptography: Digital signatures
+Suggested reading:
+	•	Security Engineering Chapters 5.3.4, 5.7.2, 5.7.4
+	•	Basic number theory fact sheet: Arithmetic modulo primes
+Advanced crypto reading:
+	•	GCAC Chapter 10 (public key tools)
+	•	GCAC Chapter 11 (public key encryption)
+	•	GCAC Chapter 15 (elliptic curves)
+	•	The past, evolving present and future of Discrete Logarithm
+	•	The Cramer-Shoup cryptosystem
+Bonus reading:
+	•	Weak Diffie-Hellman keys in practice
+	•	Elliptic Curve Cryptography: A Gentle Introduction
+	•	An introduction to Curve25519
+
+We’ve seen how Alice and Bob can communicate without first sharing a secret key: using either a key-exchange protocol like Diffie-Hellman or using a public-key encryption scheme like El Gamal. These can provide security against a passive adversary. Unfortunately both are totally insecure against an active adversary.
+
+The same was true for symmetric encryption, which we solved by using MACs and authenticated encryption. The asymmetric analog is digital signatures.
+Middleperson (MITM) attacks
+Consider the case of Alice and Bob performing a Diffie-Hellman exchange in the presence of active adversary Mallory:
+
+Alice					Mallory					Bob
+(secret a)				(secret m)			                  (secret b)
+                               ga
+           - - - - - - - - - - - - - - - - - - ->
+						                     gm
+           					- - - - - - - - - - - - - - - - - - ->
+
+                 					                     gb
+                                                                < - - - - - - - - - - - - - - - - - - -
+			gm
+           <- - - - - - - - - - - - - - - - - - -       
+
+shared secret		         shared secrets			    shared secret
+         gam				   gam, gmb 					 gmb
+
+                Dinner tmw? 😉
+          ---------------------------------->
+            (secure channel w/ kAM)
+           We should see other people 🤷
+      	  ---------------------------------->
+                (secure channel w/ kMB)
+
+
+Alice and Bob have no way of telling if they’ve received the key share the other party intended to send. An active adversary can trick both into establishing a secure channel with itself, instead of the other party, and can then forward all communication between the two secure channels, inspecting it and modifying it if desired.
+
+This is called a middleperson or man-in-the-middle (MITM) attack. In practice there are many parties, such as your ISP or wireless provider, capable of mounting a middleperson attack. We’ll discuss these threats more when we study network security.
+Detecting MITM attacks with an auxiliary channel
+It is possible to detect the presence of a MITM if Alice and Bob can check that they have derived the same shared secret. A common example is Bluetooth pairing (for versions 2+) which uses a Diffie-Hellman key exchange to generate a shared key between two devices (such as a phone and a car). This key will be used for authenticated encryption of all future communication between the two devices.
+
+
+
+At the end of the Bluetooth pairing, both devices display a short PIN code, which is a hash of the exchanged key. This is safe to display publicly because even if an observer sees the hash of the key, they don’t learn anything about the key itself as the hash function is one-way. Also note that even if the attacker can intercept/modify radio communication between the devices, we assume it can’t modify the PIN displayed on their screens or keep the devices’ owner from comparing it.
+
+This approach requires communication over an auxiliary channel, another example of out-of-band (OOB) communication. In the Bluetooth case, this is usually the visual channel (sometimes it is sound). This auxiliary channel preserves integrity against the MITM (though not necessarily confidentiality). If we have an integrity-preserving channel, why not just do the Diffie-Hellman exchange there? Some auxiliary channels provide very low bandwidth (such as human vision) so we can only communicate a short hash but not a full exchanged key
+
+Alternatively, an auxiliary channel may only become available later. Alice and Bob might perform a Diffie-Hellman exchange while only an insecure channel is available and store the hash of their shared secret. They can later verify that no MITM interfered over an independent secure channel (e.g. they meet in person). Of course this might not be very helpful if they’ve already communicated sensitive information through the MITM. 
+
+For general insecure channels though (like the Internet), we don’t have an auxiliary integrity-preserving channel to detect MITM attacks.
+Towards digital signatures
+For general insecure channels (like the Internet), we don’t have an auxiliary integrity-preserving channel to detect MITM attacks.
+
+As mentioned, Diffie-Hellman key exchange is not secure against an active attacker (a MITM) because Alice and Bob can’t be sure they’ve received the correct key shares for each other. We’d like some way for Alice to convince Bob that a message came from her and has not been modified.
+
+The name digital signatures suggests a simple real-world analog: If Alice sends Bob a letter and wants to convince him it is really from her, traditionally she signs her name:
+
+Dear Bob,
+
+I miss you. 
+
+Please write me back.
+
+Alice
+
+There are a few iffy security assumptions here:
+	•	Bob can accurately recognize Alice’s genuine signature
+	•	Nobody else can forge it
+	•	The original message hasn’t been modified since Alice signed it
+
+Real signatures don’t provide great security, because they are static, so once an adversary has observed Alice’s signature they can attempt to reproduce it. Furthermore, signatures don’t reflect the contents of the message at all, so an attacker can potentially modify the message (e.g. by adding extra words to the page) after Alice has signed it.
+
+A better technology is a wax seal, because it is difficult to tamper with the letter without modifying the seal. These are a slightly closer analog to digital signatures; unfortunately we’re stuck with the less accurate name.
+Defining digital signatures
+Before we discuss how to construct them, we can define digital signatures. Digital signatures are similar to MACs, but in the public/private key paradigm. A digital signature scheme consists of three algorithms:
+
+	•	KeyGen(λ) →(Kpub, Kpriv)
+	•	Sign(Kpriv, m) → σ
+	•	Verify(Kpub, m, σ) → True/False
+
+The value σ is called a signature on the message m. Sometimes the public key and private key are called the verification key and the signing key, respectively. The idea is the same as with public-key encryption: Bob publishes his verification key in public directories so that everybody can verify his signatures.
+
+Informally, the security property of a signature is that nobody can sign messages for a given verification (public) key without knowing the corresponding signing (private) key. One immediate application for signatures is protecting a Diffie-Hellman key exchange from an active network attacker. If Alice and Bob both sign their key shares, the attacker can’t modify them to become a MITM and read/modify their messages.
+
+Similarly, Alice can sign an asynchronous message (like an email) to Bob before encrypting it using Bob’s public key, so Bob can be sure the message came from Alice.
+
+There are also many applications where secrecy is not desired, but integrity is. For example, software publishers sign code or binaries that they publish, so customers can be sure they are installing genuine software. Many devices (such as Android phones or iPhones) have their manufacturer’s public key built-in and will only install new firmware if it is digitally signed by the manufacturer.
+Security for a digital signature scheme: unforgeability
+You can think of digital signatures as being the asymmetric equivalent of MACs, and the security game is in fact quite similar:
+
+	•	The challenger generates a random key pair by calling KeyGen(λ) →(kpub, kpriv).
+	•	The challenger sends kpub to the adversary.
+	•	The adversary may submit a series of messages mi to which the challenger responds with Sign(kpriv, mi).
+	•	The adversary outputs a message m* and a signature σ*.
+	•	The adversary wins if Verify(kpub, m*, σ*) = True and m* is not equal to any of the queries mi.
+
+Again, the adversary’s goal is to produce a signature which verifies for any message that it has not already seen a valid signature on, which is called an existential forgery.
+
+A signature scheme is secure if no PPT adversary can produce a forgery with non-negligible probability.
+
+Note that the adversary may be able to modify a message, signature pair (m, σ) and produce a different signature (m, σ’) for the same message. This does not undermine security of the signature scheme according to the standard definition. In some popular signature schemes, signature malleability is trivial to achieve. Signature malleability led to an early Bitcoin exchange, Mt. Gox, losing hundreds of millions of dollars when they didn’t realize signatures could be modified in this way. Signature schemes which do not allow malleability are called a strong signature scheme).
+Signatures from the discrete log problem
+There are actually many variations of signature schemes based on DL assumptions. Conceptually, they all build on a similar observation: arithmetic modulo p gives us the ability to verify linear equations involving secret variables.
+
+Given a prime p and a generator g, consider the function F(x) = gx (mod p). This function has a few very useful properties:
+
+	•	First, we can see that F is additively homomorphic:
+
+F(x)F(y) = gxgy (mod p) = gx+y (mod p) = F(x+y)
+
+	•	We can easily compute scalar multiples of F(x):
+
+F(x)a= (gx)a (mod p) = gax (mod p) = F(ax)
+
+	•	Finally, F(x) is one-way. Given F(x), no known algorithm can recover x in general. This is exactly the discrete-log assumption.
+
+Given these facts, we can construct a very simple (but broken) digital signature scheme as follows:
+
+	•	Alice chooses a secret value x and publishes KA = F(x) as her public key.
+	•	Given a message m to sign, Alice picks the unique value z such that m = zx (mod p - 1).
+	•	She publishes σ=z as the signature
+
+Now, Bob can easily verify this signature by checking that F(m)=Kaz. This works because Kaz = F(zx), and Alice specifically chose z to ensure that m = zx (mod p - 1), so F(m)=F(zx). Unfortunately this isn’t secure, because given m and z it is trivial to compute Alice’s private key as x = mz-1 (mod p-1).
+
+To fix this, we need to add a degree of freedom to ensure we aren’t giving away an equation which makes solving for the private key possible. We might try the following:
+	•	Alice chooses a secret value x and publishes KA = F(x) as her public key.
+	•	Given a message m to sign, Alice picks a random value y. She then picks values s to make the following equation true: m = F(y)x + sy (mod p - 1).
+	•	She publishes σ=[F(y), s] as the signature
+
+Step (2) might come as somewhat of a surprise-why is F(y) used as a coefficient for x? This choice is intentional and clever through-it ensures that for any choice of r, there is only one free variable (s) left in the equation for Alice to pick, and that it isn’t possible to pick this without knowing x.
+
+Bob can still check that this signature is accurate by computing F(m)=KaF(y)F(y)s. Again, this equation looks somewhat ugly with F(y) appearing both in an exponent and the main equation. But it works. And this time, there is no easy way to compute x given the signature, as long as r stays private. 
+El Gamal signatures
+The above explanation is essentially how El Gamal signatures work. Here is the signature scheme, replacing F(x) with gx (mod p):
+
+	•	KeyGen(λ): 
+	•	(as for El Gamal encryption)
+	•	Generate a random integer 1 < x < p-1 and set Kpriv = x
+	•	Set Kpub = gx (mod p)
+	•	Sign(Kpriv, m):
+	•	Choose random integer 1 < y < p-1
+	•	Let r = gy (mod p)
+	•	Let s = (m-rx)·y-1 (mod p-1)
+	•	σ = (r, s)
+	•	Verify(Kpub, m, σ): gm ≟ Kpubr·rs
+
+You should be able to convince yourself that the signature scheme is correct: verification always works, just like in the example above.
+
+This signature scheme is relatively simple, and many other variations are possible. The important thing, again, is that each signature verifies a linear equation on two hidden variables (the private key x and the per-signature secret y).
+A sidebar on exponents and inverses
+A few more mathematical properties are needed to understand how the signature scheme really works, which some readers may prefer to skip.
+
+First, note that in El Gamal signatures, some of the math is done modulo p and some is done modulo p-1. The reason goes to Fermat’s Little Theorem, proven in the year 1640, which states that xp-1 = 1 (mod p) for any prime p. Thus, for any base x and any exponents a, b, we can show that xa = xb (mod p) holds iff a = b (mod p-1): 
+a 	= 	b 		(mod p-1)
+a 	= 	b + k(p-1)	(over the integers)
+ga 	= 	gb + k(p-1)	(mod p)
+ga 	= 	gbgk(p-1)	(mod p)
+ga 	= 	gb(g(p-1))k	(mod p)
+ga 	= 	gb(1)k		(mod p)
+ga 	= 	gb		(mod p)
+
+Thus, when working modulo p, we can reduce all exponents modulo p-1. This is why, when choosing the value s in an El Gamal signature, the equation is solved modulo p-1. 
+
+At this point you might wonder how we compute y-1 (mod p-1), the multiplicative inverse of y. We can do so using the Extended Euclidean Algorithm, which allows us to find values a and b such that the equation ax + by = 1 is true (over the integers). This algorithm is efficient and always works if x and y are relatively prime (that is, they share no common factors). If we plug in x=p-1, solving the above equation gives us a value b such that by=1+a(p-1), or equivalently by=1 (mod p-1), which is exactly the definition of a multiplicative inverse. This is exactly what is done during a Schnorr signature to compute y-1.
+
+Finally, one might note the requirement that y and p-1 are relatively prime for this to work. If they aren’t, even the genuine signer might have no way of making this equation true. There are a few possible solutions. First, one can simply always choose a prime value for y, guaranteeing with high probability it shares no common factors with p-1 (unless it divides p-1). This requires extra primality testing though. A simpler approach is to pick a random y, and start over if it isn’t relatively prime to p-1. This can be quickly checked using the (basic) Euclidean Algorithm.
+
+In practice, typically a generator g is chosen which generates a prime-order subgroup of Zp. That is, the set {g, g2, g3, ... , 1} mod p has size q for a large prime q. This is also called the order of g or ord(g). The value y can then be chosen to be any value in the range (1, q), all of which are relatively prime to q, and the value s is chosen as s = (m-rx)·y-1 (mod q), rather than mod p-1. LaGrange’s Theorem states that q must be a factor of p-1. Typically p is chosen such that p-1 has a large prime factor q, sometimes even p=2q+1, in which case p is called a Sophie Germain prime.
+Schnorr signatures
+El Gamal signatures were the first scheme developed based on discrete log, but they are rarely used anymore. One downside is that the signatures are relatively large, with the component r = gy (mod p) being as large as the prime p, typically 1024 bits. Inversion is also required during signing. A more efficient scheme, Schnorr signatures, can be built to take advantage of a smaller prime-order subgroup.
+
+With Schnorr, we assume a large p and also a generator g which generates a prime-order subgroup q for a smaller (but still large) prime q, for example around 256 bits to obtain a 128-bit security level.
+
+	•	KeyGen(λ): 
+	•	(as for El Gamal encryption)
+	•	Generate a random integer 1 < x < p and set kpriv = x
+	•	Set kpub = gx (mod p)
+	•	Sign(kpriv, m):
+	•	Choose random integer 1 < y < q
+	•	Let r = gy (mod p)
+	•	e = H[r ‖ m] where H is a hash function onto integers mod q
+	•	Let s = y - x·e (mod q) 
+	•	σ = (s, e)
+	•	Verify(kpub, m, σ): e ≟ H[gs·kpube ‖ m]
+
+Don’t worry if this looks like a confusing mess at first. It is. But the concept is largely the same as with El Gamal: setting up a linear equation that only the signer can produce solutions to, but anybody can then easily verify.
+
+You can work out the algebra to see why verification works. The security argument for this signature scheme is a bit more involved and we won’t present a formal proof here. But this scheme can be proven secure if the hash function H is modeled as a random oracle and the discrete log assumption holds (security proofs exist based on different assumptions, as well).
+
+An informal argument for security goes as follows. In forging a signature, an adversary can easily execute steps (a)-(c) of the Signing algorithm above. The only difficult part is step (d), which would require computing s = y - x·e (mod q) without knowing x (all the other values are known). If the adversary could solve this equation for s, though, then they could immediately compute x by simple algebra: x = (y - s)·e-1 (mod q). So if they could compute signatures this way, they could compute discrete logs by solving for x given a public key gx. This is definitely not a complete security proof: an adversary could forge a signature some other way, without knowing the corresponding value y for the signature, which would not be equivalent to solving a discrete log. A full security proof needs to rule out this as well, and is beyond the scope of this text.
+
+Notice that this scheme has quite different properties from RSA: signatures are randomized, so there are many possible signatures per message. And there is no message recovery: given a signature σ = (s, e) it is not possible to re-compute m.
+
+DSA: Unfortunately the Schnorr signature scheme was patented until the mid 2000s and as a result a similar algorithm called the Digital Signature Algorithm (DSA) was standardized. We won’t discuss the details here, as the concepts are quite similar. DSA is probably the most common algorithm in use today so it’s important to recognize the name, but it is more complicated and strictly worse (signature sizes are the same). 
+The importance of randomness
+Both El Gamal and Schnorr signatures (as well as DSA) require the signer to choose a random value y during signing. This randomness is an unfortunate security liability. Notice that if an adversary ever observes a signature σ = (s, e) and also learns the random value y generated in the Sign() algorithm, they can immediately solve for the private key x, since the only remaining unknown in the equation for y. 
+
+There are even attacks where an adversary can learn x from knowing a few bits of y in many different signed messages. As a result it is critical that y is chosen randomly and deleted after signing. Many implementers don’t appreciate this requirement, and it has been a persistent source of vulnerabilities to re-use random values.
+
+One useful trick is to generate y pseudorandomly by maintaining a secret key k and computing y = PRF(k, m), guarding against the risk of a faulty random-number generator. The Curve25519 libraries, among others, take this approach.
+Other discrete-log based signature schemes
+Elliptic curve versions: Like with Diffie-Hellman and El Gamal, all of these signature algorithms (and others which exist) can be implemented in the integers mod p, or an elliptic curve group (as well as other groups in which the discrete log problem is hard). It’s common to see EC-Schnorr and ECDSA, these are simply the elliptic curve versions. ECDSA is used in Bitcoin and most other cryptocurrencies. A signature is still two numbers. But when implemented for a 256-bit elliptic curve group, signatures are still only 512 bits, compared to 2048 bits for a typical RSA signature.
+
+BLS signatures: There is another signature algorithm worth mentioning, although it is not widely deployed today. BLS signatures are also implemented using elliptic curves, but unlike Schnorr and ECDSA, the BLS algorithm is very simple and elegant. For a public/private key pair (x, gx), a signature on message m is simply H(m)x. Verifying these signatures requires using a special type of elliptic curve with an additional property called a bilinear pairing. Signatures are only a single element, so they are half the size of other algorithms. At 256 bits, this is the shortest secure signature algorithm known. BLS signatures are deterministic, avoiding randomness problems. They also support several advanced features, like aggregating multiple signatures together into a single short signature. The only real catch is that they are slower to verify and the special pairing-equipped elliptic curves are not as widely implemented.

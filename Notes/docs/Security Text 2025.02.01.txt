@@ -1,0 +1,232 @@
+ Chapter 1: Secure communication: PGP, OTR and Signal
+Suggested reading:
+	•	Unger et al. 2015 Sections I-IV
+More detailed reading:
+	•	Signal Double Ratchet Specification
+	•	The Double Ratchet: Security notions and proofs
+Bonus reading:
+	•	How to use PGP a video by Edward Snowden (for Glenn Greenwald)
+	•	"Efail" vulnerabilities in PGP
+	•	15 reasons not to start using PGP
+	•	Why Johnny Can't Encrypt, an early usability study of PGP
+	•	Even the inventor of PGP is not using PGP
+	•	EFF Secure Messaging Scorecard 1.0
+
+Secure communication over an untrusted network is the classic problem that cryptography was developed for. We’ve seen the tools (authenticated encryption, MACs and key exchange protocols) that can solve this problem, at least mathematically. But two humans can’t just do an Elliptic Curve Diffie-Hellman exchange in their heads and then encrypt a message with AES-GCM. They need software to facilitate their communication, which brings a number of practical challenges. Most notable is key distribution and management. In this chapter we’ll turn our attention to practical tools for secure communication.
+
+In the 1990s and 2000s, email was the most important digital communication tool and PGP was developed to add encryption to email. Since then, there has been more attention paid to lighter-weight services typically called IM, text or chat. The Signal protocol emerged as the most popular encryption protocol for this scenario and now protects billions of messages per day on WhatsApp, iMessage and others (and is optional on Facebook Messenger, Skype and other protocols). An IETF working group is currently developing a similar protocol called Messaging Layer Security (MLS), intending to serve as a standard for secure messaging applications.
+
+The two protocols have very different security properties and are useful examples of some of the design trade-offs in secure communication.
+
+The gold standard: end-to-end encryption
+Note that many modern forms of communication, including phone networks and email, employ various forms of encryption along the way. For example, if Alice sends a message from her Gmail account to Bob’s Yahoo! Mail account, she’ll most likely log into Gmail with an encrypted (HTTPS) session to write her email. The mail will be sent from Gmail to Yahoo! Mail over an encrypted mail channel (SMTPS). And Bob will probably also use HTTPS to read it. The messages might also be encrypted by the local WiFi network or at other layers. But critically, both mail servers were able to see Alice’s message in this case (which they might utilize to filter spam or show ads).
+
+Phone networks work similarly, with encryption at many different points in the communication and relay mobile phone calls or SMS. But again, service providers can typically read all traffic.
+
+These uses of encryption might protect against some eavesdroppers some of the time (for example your local network admin can’t easily read your Gmail correspondence). But they leave your message exposed at many points along the way. Hence they’re called point-to-point encryption.
+
+The goal of truly secure communication is that messages are encrypted before leaving Alice’s device (or endpoint), using a key only known by Bob, and not fully decrypted until reaching Bob’s device. This is called end-to-end encryption or sometimes E2E encryption. Anything less is not really considered secure by cryptographers.
+PGP: The world’s first free encryption software
+In 1991, a software developer named Phil Zimmermann released the first version of PGP (Pretty Good Privacy) as freely available open-source software. PGP enabled anybody to encrypt email messages using then-modern cryptographic algorithms including RSA encryption/signing and the DES block cipher.
+
+This was a historic moment in cryptography, which had previously been the domain of spies, armies, and (later) banks. At the time of PGP’s release the United States still had laws forbidding the export of strong cryptographic algorithms, which were classified as munitions. The release of PGP caused a panic amongst various intelligence agencies at the prospect of ordinary citizens encrypting their communications in a way that they could not be read by the authorities. 
+
+A long public and courtroom debate played out called the Crypto Wars (or sadly now sometimes called the First Crypto Wars). The US government notoriously proposed an alternative to PGP called the Clipper chip which would provide encryption with a purpose-built mechanism for the government to decrypt (called a backdoor). Organizations like the Electronic Frontier Foundation (EFF) arose to publicly defend the rights of citizens to privacy for their communication. Zimmermann himself faced a long legal battle and years in jail before charges were dropped.
+
+Today PGP is legal in most countries. Unfortunately it is now outdated technically.
+How PGP works
+PGP allows users to generate a public/private key pair on their personal computer. Initial versions generated randomness for the private key in part by asking the user to move the mouse randomly for several seconds. Originally only RSA was supported for both signing and encryption; later versions added support for El Gamal and DSA.
+
+PGP public keys can be exported to a plaintext format (called ASCII-armored) for distribution via websites or PGP key directories. For example, here is my key: 
+
+
+
+PGP can be used to encrypt arbitrary files, but is most commonly used to encrypt the body of email messages. The original plaintext is replaced by an ASCII-encoded encryption. When read in a normal email client, it will look like a string of random base64-encoded characters, as above. But with a PGP-enabled mail client, it will be automatically decrypted.
+
+PGP uses classic hybrid encryption. First, a random message-specific symmetric key is chosen. This is used to encrypt the message using a symmetric encryption algorithm. Next, the symmetric key is encrypted with the recipient’s public key. Finally the sender signs the encrypted fields. The full process is:
+
+C1 = SymmetricEncrypt(km, message body)
+C2 = PublicKeyEncrypt(Kreceiver, km)
+σ  = Sign(Ksender, C1 ‖ C2)
+
+The values C1, C2, σ are packaged into a single ASCII-encoded blob which becomes the new message body. There is also an option to include the sender’s public key (for verifying the signature). The message headers (including the subject and recipient addresses and the email’s subject) are sent unencrypted.
+PGP’s web of trust
+A major question remains which must be solved by any secure communication platform. When Alice sends a message to Bob for the first time, how does she learn Bob’s public key? Any system needs some form of public key infrastructure to distribute keys.
+
+One way people can make their public keys known is to publish them. For example, my personal website lists my PGP key:
+
+
+
+Not everybody has a personal website. Some social media sites, like Facebook, allow users to list their PGP public key:
+
+
+
+PGP offers a few options. One is to download the public key from a PGP key server. Protocols were standardized for querying and downloading keys and a few are still running today. In addition to needing to trust the key server to give honest answers though, this begs the question: how does the key server know what Bob’s public key is? If an attacker can impersonate Bob and publish her own key on the server under Bob’s email address, she’d be able to read all of Bob’s mail.
+
+In some enterprise scenarios, an organization (like a university) runs a central trusted key server and everybody is happy to trust them. But this doesn’t work for the entire public email ecosystem.
+
+Instead PGP used a model called the web of trust. Users attempt to verify the public keys of users they frequently communicate with. This requires obtaining the key’s fingerprint from a trusted source. For example, my key fingerprint is:
+
+7418 4405 F45F FDA9 B172 D845 58F8 D41E 8CA3 A9E8
+
+The key fingerprint is just a nicely formatted hash of the public key. The standard hash used is SHA-1 which produces 160 bits of output that are formatted as 40 hexadecimal characters in blocks of 4. For a secure hash function, there is no way to find a key which has the same fingerprint, so it’s enough to just obtain a user’s fingerprint from a trusted source (not the entire key, which is much longer). Of course, SHA-1 is now broken due to the publication of a collision, but it is still intractable to find a second preimage.
+
+So, Alice might download Bob’s key from an untrusted key server, and later check with Bob that the key she downloaded has the right fingerprint. She might check this by asking Bob in person, calling him on the phone (which is insecure if the phone line is bugged), or Bob might print the fingerprint on his business card, like so:
+
+
+
+The web of trust model kicks in when Alice then vouches for Bob’s key by signing it with her own key. Her signature is on a message which states “I know Bob, with email address bob@example.com, has a key with fingerprint X.” After Bob has gotten a number of signatures on his key, he might present them to a new communication partner, say Carol. Carol may not have verified Bob’s key personally, but if she has verified Alice’s key and Alice claims she has verified Bob’s, this provides some evidence she has the right key for Bob. Stronger evidence will be provided if more of Carol’s verified peers have signed Bob’s key.
+
+The web of trust model assumes transitive trust. That is, if Carol trusts Alice, and Alice says she’s verified Bob’s key, then Carol accepts it. In theory more hops could be involved: if Bob says he has verified David’s key then Carol might trust that as well. In practice, trust usually is not transitive past one or two degrees. Some versions of PGP also enabled users to specify how fully they trust that a key maps to a specific user:
+
+
+The web of trust model has the advantage that it is decentralized and hard for any one entity to subvert. It has the major disadvantage that users, for the most part, either don’t understand it or hate doing it (often both). Early ideas included inviting users to key-signing parties, complete with free pizza, to encourage them to go through the effort of signing each other’s keys. Many users simply sign any key requested of them without doing any in-person verification.
+
+We haven’t even mentioned the headaches caused by revocation: what happens when Bob loses his private key and needs to tell all of his contacts to stop using the old public key and start using a new one? There was never a great answer to this question beyond “go through the whole process again.”
+PGP security shortcomings
+Despite updates, PGP is now quite old and rickety. Matt Green dubbed it “a museum of 1990s crypto.” It has a number of security shortcomings:
+
+Unencrypted data: PGP only encrypts the body (and, separately, attachments if there are any) of an email. The subject, sender, receivers, and other SMTP headers are not encrypted. This allows legacy mail clients to handle PGP messages without rejecting them or crashing. But it has been a frequent source of errors, as users don’t realize this limitation and put sensitive information into the subject line.
+
+Signature removal: Because the signature is the last step in PGP, Mallory can intercept a PGP-encrypted email from Alice to Bob, strip Alice’s signature off, and replace it with her own. Bob will think he’s received the message from Mallory directly and decrypt it correctly. Mallory can’t modify the contents of the email, and it might look suspicious to Bob if his email from Mallory ends with “Love, Alice.” But there is no cryptographically enforced authentication that can’t be replaced.
+
+No authenticated encryption: PGP was developed before the notion of authenticated encryption had even been designed. No MAC is used at all at the symmetric layer. It was thought that this isn’t a big problem, since messages are signed. However, as noted above, this signature can be removed and replaced, in between which the ciphertext might be modified. This combination, along with the fact that some email clients perform HTML rendering which can trigger network-observable resource loads, led to the ingenious "Efail" attack on PGP which can actually be used to decrypt messages. As a result, security requires disabling all HTML rendering in email.
+
+No deniability: Because Alice signs every message she sends to Bob, she can’t later deny having sent them. Bob can publish Alice’s signature along with the symmetric message key to prove Alice sent a specific message. This could be used to embarrass Alice, or report her to the authorities. In some cases, this might be a feature, if non-repudiation is desired. In other cases, it is a shortcoming. Offline, private conversations are deniable, in that neither party can prove what was said to outsiders.
+
+No forward secrecy: If Bob’s private key is stolen, it can be used to decrypt every message sent to him for as long as he had that key. This might include encrypted messages that were captured and stored years before. We would like to provide a property called forward secrecy: as soon as a message is decrypted and read, key material can be deleted so there is no risk of it being stolen in the future. Bob might try to change keys often to get a weak form of this, but this would amplify the key verification headaches which already plague PGP.
+
+Poor usability: The biggest shortcoming is that despite 20+ years of development effort, PGP software has always been a headache to use. It requires a lot of configuration to generate a key and import contacts’ keys, as well as key verification work. Edward Snowden famously made a 12-minute video explaining how to set up PGP for Glenn Greenwald. This is not just a matter of user annoyance: an infamous usability study found that the majority of users were not able to use PGP correctly, making basic errors like sending unencrypted or unsigned emails thinking they were encrypted and signed. Perhaps most damning, even Phil Zimmermann, the creator of PGP, eventually gave up on using it.
+
+For all of these reasons, PGP (and S/MIME, a similar encryption protocol for email) are not recommended, though they are still widely used and in certain fields they remain standard practice for handling sensitive data.
+The secure chat scenario
+PGP was designed for email, but by the late 1990s instant messaging services had become popular and PGP was not a good fit. For starters, PGP uses a separate public key encryption and signature for every message sent. This is a lot of overhead in an IM conversation where a message might be as short as “hi” or “👍.” These protocols are also synchronous: both parties are usually online while communication is happening, unlike email which can be sent, stored on a mailed server and downloaded later.
+
+Off-the-record (OTR) was an early encryption protocol designed for instant messaging services (specifically, early versions supported AOL Instant Messenger as well as its successors like GAIM and Pidgin). The original OTR paper’s title belied its design goals: “OTR, or why not to use PGP.”
+
+In addition to being designed for a synchronous setting, OTR was designed to provide deniability and forward secrecy. OTR proved to be a popular protocol. With the rise of smartphones, it was implemented by several phone applications. One of these, called TextSecure, evolved into Signal, a popular app today designed with security in mind. Signal made several key improvements to OTR’s design but retained much of its original design philosophy. Signal now has millions of users, and the protocol has been used by billions of people every day since WhatsApp adopted it for all messages in 2015. Based on WhatsApp’s deployment alone, it is the most popular protocol in history, by far, for secure communication. Signal’s protocol has since been adopted by many other projects, including Facebook Messenger and Skype, though only in an optional “private conversation” mode. We’ll describe Signal here as a modern case study.
+
+The “Signal protocol” is now being improved and standardized by an IETF working group as the Messaging Layer Security (MLS) protocol, so we might see this name used more in the future.
+The Signal handshake: Triple Diffie-Hellman (3-DH)
+A chat between Alice and Bob starts with a handshake where they exchange cryptographic key material and establish a shared session key. We’ll assume for now that Alice and Bob already know each other’s public keys.
+
+A classic approach, which the original OTR used a version of, is to do a Diffie-Hellman (hereafter DH) exchange to establish a session key, with Alice and Bob using their private keys to sign their DH values ga, gb. These DH shares are called ephemeral since they last for one session only, compared to the long-term or identity public keys which identify Alice and Bob permanently, which we’ll call gA and gB.
+
+Signal does a more interesting handshake to achieve deniability. No signatures are involved; instead, three DH exchanges are combined to authenticate both parties and produce a session. Alice starts with identity key gA and ephemeral key ga (her secrets are A and a). Similarly Bob has identity key gB and ephemeral key gb (his secrets are B and b). Alice sends Bob gA and ga and he sends back gB and gb. Their initial shared secret is computed as:
+
+kroot1 = H(gA·b, ga·B, ga·b)
+
+Alice is convinced she’s talking to Bob if he can derive the same kroot1, because this requires knowing his long-term private key B. Similarly Bob is convinced he’s talking to Alice. But it’s also possible for anybody to simulate this handshake without the involvement of either party at all by choosing a and b, so either party can deny they ever participated in the conversation.
+
+Order matters! Note that both parties need to agree on an ordering of the shares gA·b, ga·B, ga·b when they compute the KDF, or they will get different results.
+
+Signal does all Diffie-Hellman operations using the curve25519 elliptic curve.
+
+Achieving asynchronous delivery with pre-keys. Signal’s actual handshake is a bit more complex, because it does not require both users to be online. This enables users to send a new message asynchronously to another user. To achieve this, Signal caches about a hundred pre-generated ephemeral keys for each user called pre-keys. Alice can send a message to Bob by asking for a new pre-key for Bob from the server and then completing the handshake.
+Forward-security with a double ratchet
+After their handshake, Alice and Bob are ready to chat. From the root key derived from their handshake, Alice and Bob derive symmetric keys for authenticated encryption. They do so using a key derivation function (KDF) which is really just a hash function with an extra “label” input:
+
+KDF(k, label) = H(label ‖ k)
+
+Bob will derive his first key chain by computing the KDF on the root key with the label CHAIN_LABEL. To achieve forward secrecy, after every message Bob sends, he will ratchet the chain key (by again calling the KDF with CHAIN_LABEL) to derive a new key. He can then delete the old value to ensure that it can’t later leak and allow an adversary to decrypt an intercepted ciphertext. Hence, forward secrecy is achieved on a per-message basis, as key material can be immediately discarded after use.
+
+The analogy to a mechanical ratchet (a device which only allows rotation in one direction) comes in because a specific chain key can be used to compute all future chain keys, but not any past chain keys.
+
+A single ratchet structure as described above wouldn’t support receiving out-of-order messages: the old value would need to be kept around if a particular message wasn’t received on time, and that could be used to derive all future keys in the chain. So Signal instead uses a double ratchet as follows:
+root key
+chain key 1
+DeriveKey()
+chain key 2
+DeriveKey()
+CHAIN_LABEL
+DeriveKey()
+DeriveKey()
+msg key 1
+msg key 2
+KEY_LABEL
+KEY_LABEL
+chain key 3
+DeriveKey()
+CHAIN_LABEL
+...
+DeriveKey()
+msg key 3
+KEY_LABEL
+CHAIN_LABEL
+DeriveKey()
+ROOT_LABEL
+input for next root key
+From each chain key value, a message key is derived by again calling the KDF, but with a different label KEY_LABEL (ensuring the message key is distinct from the next chain key). Each message key is used only once and then deleted. The advantage of the double ratchet is that, if needed, an old message key can be cached to decrypt an out-of-order message, but keeping this value around does not allow deriving any other message keys in the chain.
+
+Signal uses these message keys to perform authenticated encryption on each message using a combination of AES in CBC mode and HMAC with SHA-256.
+Adding resiliency with a Diffie-Hellman ratchet
+The symmetric double ratchet enables good forward secrecy, as key material can be deleted quickly after it’s used. However, if this was the only ratcheting, the protocol would not be resilient to a temporary compromise. If an attacker learns any of the chain key values, they could compute all of the following values indefinitely.
+
+To address this, Signal adds another layer of ratcheting. The root key is continuously updated by new Diffie-Hellman computations. In fact, before Bob (the responder) ever sends a message, he generates a new secret b2 and ephemeral DH key gb2. He then computes the DH value ga1·b2 (where Alice’s initial ephemeral DH value is ga1) and uses this to update his root key.
+
+For Alice to be able to decrypt, Bob will need to send his new DH value gb2 (a DH ratchet key) along with his encrypted message. Alice can then derive the same value ga1·b2 and update her copy of the root key to derive Bob’s current sending key chain. She can then use this to decrypt Bob’s message. As long as Bob is the only one sending messages, she’ll keep updating her receiving chain using the symmetric ratchet (the double ratchet implemented above).
+
+When Alice has a message to send back, it’s her turn to:
+	•	Pick a new DH ratchet key ga2
+	•	Update her root key by combining with ga2·b2 
+	•	Derive a new sending key chain. Use this to encrypt her message and send it to Bob (along with ga2) so he can update his root key in the same way and decrypt.
+	•	Ratchet the root key (using ROOT_LABEL) to avoid keeping the old one around
+
+All this work to keep Eve out of the conversation! In general, the DH ratcheting proceeds in turns. At first, it’s Bob’s turn to send a new DH ratchet key and update his sending key chain. He’ll then use these keys for all messages he sends until it’s his turn again. Note that this process ensures that Alice and Bob each use a distinct chain of keys to send messages to each other, ensuring no two messages are ever encrypted with the same key. The sequence of root keys and derived chains will go like this:
+
+Root key version
+Derivation
+Sender who uses this chain
+kroot1
+KDF(Triple DH output)
+Alice
+kroot2
+Combine(Ratchet(kroot1), ga1·b2)
+Bob
+kroot3
+Combine(Ratchet(kroot2), ga2·b2)
+Alice
+kroot4
+Combine(Ratchet(kroot3), ga2·b3)
+Bob
+...
+...
+...
+
+The two sides must agree on who updates first. By convention we’ll say that Bob (the responder) updates first (before sending his first message) and sends a new DH value. If Alice (the initiator) sends the first message, she’ll use the sending chain derived directly from the first root key derived from the initial handshake.
+Public key distribution in secure messaging apps
+Finally, the ever pesky question: how does Alice learn Bob’s public key? Signal, WhatsApp and nearly all other protocols employ a simple answer. Alice’s client software automatically downloads Bob’s key from the Signal server and starts using it. If Bob changes keys (say, because he dropped his old phone in a lake) then he uploads a new one to the server and Alice automatically downloads that.
+
+Of course, this puts the Signal server into a trusted position. If it acts maliciously, it can give Alice an incorrect value for Bob’s public key-one that the server knows the private key for. The only way to detect this is if Alice and Bob do an independent check. This is quite similar to the classic key fingerprint verification from PGP:
+
+Alice and Bob are meant to meet in person and check that their screens show the same values. They can also take pictures of each other’s QR codes to speed the process up. Signal calls the fingerprints safety numbers as they found users had no idea what a key fingerprint meant and thought it sounded like sensitive personal information.
+
+As with PGP fingerprint verification, we can assume the vast majority of users will never bother to check their safety numbers in Signal. 
+
+The revocation problem still exists as well, as the process must be repeated every time users change keys. Users get a warning when keys have changed:
+
+
+In practice, users change keys a lot, as they uninstall/reinstall apps or lose phones and replace them. By some estimates the “half life” of a personal phone is only 7 months.
+Opsec: Operations security
+Signal and WhatsApp are big steps up over PGP in terms of usability. The vast majority of users don’t realize encryption is happening at all. However, it still takes a few steps to actually use it securely. Steps to mitigate the risk of compromise are called operations security (often shortened to opsec). There are many guides and checklists for opsec, including one from Edward Snowden and one from the Electronic Frontier Foundation which describes Signal in some detail.
+
+The number one component of any opsec plan is endpoint security. Signal or WhatsApp can provide end-to-end encryption, but this won’t protect you if an adversary has compromised one of the endpoints (the devices you use to communicate). In particular it’s necessary to keep endpoints physically secure, running up-to-date software and protected by strong authentication. If an adversary steals your phone and guesses your password or fakes your fingerprint, they can just read your messages from the screen as you normally would.
+
+For the secure chat application specifically, users should verify key fingerprints (safety numbers) to be sure the server hasn’t cheated. To date there is no evidence that the server has cheated, but if nobody ever verifies we won’t know.
+
+Deleting history is important. Forward secrecy is useless if you keep a long conversation history stored on your phone. Anybody who steals your phone can recover all of your plaintext. It’s best to think of forward secrecy as enabling secure deletion of messages, because if you delete them they really are gone forever. But if nobody deletes anything, it adds nothing. 
+
+An implication of this is that plaintext should not be backed up in a way that an adversary compromising a user’s device can access the backups. By default WhatsApp backs up all conversations to a central server. Disabling backups is necessary (though not sufficient) to benefit from forward secrecy.
+Metadata
+Finally, it's important to note that Signal (nor OTR or PGP) is not designed to hide the communication graph (who is talking to whom) nor the time or length of conversations. This information is collectively called metadata. Former CIA director Michael Hayden notoriously testified that “we kill people based on metadata.” For example, communicating frequently with a suspected terrorist group has been enough to classify a person as a member of the group. There are many other examples of sensitive metadata: communicating with a specialty medical clinic might reveal that a person is likely afflicted with a specific health problem.
+
+With Signal, WhatsApp, and most other encrypted messaging apps, a central server delivers all messages and hence learns the entire communication graph as well as other metadata:
+	•	How often specific pairs of users talk to each other
+	•	How many messages each user sends in a conversation
+	•	The size of messages being communicated
+	•	Creation of groups of more than two users
+	•	User’s IP addresses (we will discuss the implications of this further when we discuss network security)
+	•	Possibly, some details about which version of the app users have installed and what devices they are using to communicate
+	•	If users are using multiple devices to communicate
+
+Anonymous communication which hides the communication graph and other metadata is a much more challenging problem. While it has been the subject of intense research dating to the 1980s, today few users use apps which protect metadata.

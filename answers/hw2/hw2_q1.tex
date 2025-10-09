@@ -1,0 +1,35 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\title{HW 2 Answers -- Question 1}
+\author{CSCI-UA.0480-63}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section*{1. Public key crypto at toy security levels}
+\subsection*{(a) $p=10007$, $g=3$}
+\begin{enumerate}[leftmargin=*]
+  \item Order of $g$ mod $p$: $5003$.
+  \item Shamir three-pass with $m=1337$, $a=2461$, $b=4319$:
+  \begin{itemize}
+    \item $a^{-1} \bmod (p-1)=7103$, $b^{-1} \bmod (p-1)=5259$.
+    \item Transmissions: $x_1=m^a\bmod p=792$, $x_2=x_1^b\bmod p=1441$, $x_3=x_2^{a^{-1}}\bmod p=5629$ (Bob recovers $m$ by raising to $b^{-1}$).
+  \end{itemize}
+  \item Diffie–Hellman with $a=2461$, $b=4319$:
+  \begin{itemize}
+    \item $A=g^a\bmod p=5974$, $B=g^b\bmod p=7413$, shared secret $s=B^a\bmod p=A^b\bmod p=6122$.
+  \end{itemize}
+\end{enumerate}
+
+\subsection*{(b) RSA with $p=383$, $q=401$}
+\begin{enumerate}[leftmargin=*]
+  \item $\varphi(N)=(p-1)(q-1)=152800$.
+  \item With $e=11$, the private exponent $d\equiv e^{-1}\bmod \varphi(N)=13891$.
+  \item Encrypting $1337$: $c=m^e\bmod N=113846$.
+  \item Signing $1337$: $\sigma=m^d\bmod N=101732$.
+\end{enumerate}
+
+\end{document}

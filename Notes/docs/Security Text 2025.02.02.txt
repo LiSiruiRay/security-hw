@@ -1,0 +1,191 @@
+Chapter 2: Encryption on the web: HTTPS
+Suggested reading:
+	•	Security Engineering, section 21.4.5
+	•	Clark and van Oorschot Sections I-III
+	•	Introducing TLS 1.3 (Nick Sullivan, Cloudflare)
+	•	A Secure Web is Here to Stay (Google blog)
+More detailed reading:
+	•	TLS 1.3 Specification
+Bonus reading:
+	•	The Illustrated TLS Connection: TLS 1.2, TLS 1.3
+	•	List of TLS/SSL vulnerabilities
+	•	SSL Pulse (a survey of HTTPS deployment)
+	•	Qualys SSL Server Test
+History and terminology
+You’ve seen a padlock icon in your web browser for many years, including right now: 
+
+The padlock indicates a “secure” connection. Technically, this means a connection using the HTTPS protocol (also noted in the URL). The “S” stands for secure. Diving one layer deeper, HTTPS means the HTTP protocol combined with the Transport Layer Security (TLS) or the older Secure Sockets Layer (SSL) protocol.
+
+The three terms HTTPS, TLS and SSL are often used interchangeably, but a brief history and network-layer view can help illuminate the difference.
+
+Initially all web browsing was unencrypted. Engineers at Netscape, the first commercial web browser company, wanted to add encryption to facilitate secure e-commerce, primarily transmitting credit card numbers. Engineers at VISA proposed a separate protocol called SET that would encrypt credit card numbers only; fortunately Netscape’s approach won out, which was to encrypt the entire web connection.
+
+Netscape designed the first protocol, SSL 1.0, but when they hired outside consultants to review their design they decided it was so broken they needed to start over. Today it’s difficult to even find info on SSL 1.0. The next attempt, SSL 2.0, was deployed via Netscape Navigator in 1994, but had many design flaws and was replaced a year later.
+
+SSL 3.0, released in 1995, was the first version that stuck and was reasonably secure for a long period. It turned out to have a number of design errors that were discovered over the years and was finally deprecated in 2015. It’s still worth learning about as it provides a plethora of examples of subtle and interesting protocol vulnerabilities, many of which went unnoticed for over a decade. The name SSL also stuck for a variety of reasons. This was the first version that many security engineers heard of.
+
+SSL 3.0 was still designed in-house by Netscape, a private company. Due to the importance of the protocol, design of the next version was taken over by the Internet Engineering Task Force (IETF), a non-profit organization which writes standards for Internet protocols. Instead of calling the next version SSL 4.0, they called it TLS 1.0 (published in 1999). The name change was meant to be clearer and signify a change in ownership, even though TLS 1.0 is nearly identical technically to SSL 3.0.
+
+IETF publishes their standards through RFC (Request for Comments) documents. If you want the official standard, you look up the RFC. For example, TLS 1.0 is defined by RFC 2246. Two more versions of TLS, v1.1 and v1.2, came out which made incremental improvements. More bugs were continually found during the 2010s, aided by researchers using automated protocol modeling software to detect bugs.
+
+The latest and greatest version is TLS 1.3, standardized in 2018 (more than 10 years after TLS 1.2). Unlike the earlier incremental improvements TLS 1.3 is a relatively radical redesign which greatly simplified the protocol.
+HTTPS is TLS applied to web browsing
+TLS (and SSL) are transport-layer protocols (they are typically layered on top of TCP, which we’ll discuss in more detail later). Essentially, they can be used to encrypt any type of data being sent between a client and server. For example, Netflix uses TLS to encrypt all of its video streams, but these are not sent via HTTP, so these are using TLS but not HTTPS.
+
+HTTPS means the HTTP protocol (web browsing) running over an underlying TLS or SSL connection. This is the most common use of TLS, but there are many others. 
+
+The past decade has seen dramatic growth in the deployment of HTTPS, as data collected from Chrome users shows:
+
+
+Until the early 2010s, HTTPS was still perceived as a specialty protocol for sensitive web browsing applications like credit card payment or health record access. It was also perceived as expensive and likely to add latency to page loads. You may encounter these attitudes among older-generation web designers and admins, but they are no longer true. The performance overhead has been optimized down to around 1% over unencrypted traffic and HTTPS should be considered the default setup for any website.
+
+Google announced plans in 2015 to deprecate insecure HTTP in favor of HTTPS, and since 2018 Chrome will mark any site not using HTTPS as “insecure.”
+The classic TLS handshake: protocol negotiation
+We’ll now dive into the structure of TLS. Our discussion will generally apply to both TLS and SSL, we’ll say “TLS” unless talking about a specific protocol version in which case we’ll say SSL 3.0, TLS 1.1, etc.
+
+Unlike the bilateral secure communications protocols we saw (PGP/Signal etc.), TLS is inherently designed with a client-server model. The client is typically a web browser. Clients initiate all connections in TLS. TLS is also synchronous, assuming that both client and server are online.
+
+TLS is also connection-oriented (or session-based). The client and server first exchange some metadata messages in a process called a handshake to establish a shared session key, then they use these session keys to encrypt actual application data (like web-browsing traffic).
+
+TLS connections (sessions) start with the ClientHello message:
+
+ClientHello:
+	•	Highest TLS/SSL protocol version supported
+	•	List of supported ciphersuites
+	•	List of supported extensions
+	•	Random value rclient
+
+The client sends data about which protocol options it supports. The goal is to allow clients and servers to gradually add support for new cryptographic algorithms and use the most secure option they both support, a process called protocol negotiation.
+
+It isn’t much of a negotiation though: the server picks exactly which options the session will use and lists them in the ServerHello message:
+
+ServerHello:
+	•	TLS/SSL protocol version to use
+	•	Ciphersuite to use
+	•	Random value rserver
+
+Note that the server never lists the set of protocol versions or ciphersuites it can support, it simply takes the client list and picks whatever it likes. The standard says that it should pick the most secure mutually-supported option, but servers may optimize for performance instead.
+
+The server next sends its ServerCertificate message which includes its public key, as well as a certificate proving this is the right public key. We’ll come back to certificates.
+Ciphersuites
+Ciphersuites are combinations of cryptographic algorithms. There is a huge table of ciphersuites listed in each TLS standard. Each is given a 4-byte code but they are usually listed in documentation as a string which describes, in order, public key algorithms, symmetric encryption and then MAC and hashing algorithms. For example:
+
+TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+
+This ciphersuite includes elliptic-curve Diffie-Hellman key exchange, elliptic-curve DSA signatures, AES-128 in GCM mode for authenticated encryption, and the SHA-256 hash function. An older, completely different ciphersuite might look like:
+
+TLS_RSA_WITH_RC4_128_SHA
+
+This ciphersuite uses RSA for public-key encryption, the RC4 stream cipher for symmetric encryption and SHA-1 as a hash function. 
+
+The ciphersuite mechanism is a bit finicky in that a complete suite of algorithms must be listed. If you inspect your browsers’ list of ciphersuites you’ll see a lot of redundancy:
+
+
+
+It would have been easier to just say that RSA and ECDSA signatures are both supported, AES-128 and AES-256 are both supported, and SHA-256 and SHA-384 are both supported, rather than listing many permutations of those options.
+The old paradigm: RSA-style key exchange
+In an RSA-style key exchange, immediately after receiving the server certificate the client responds with the ClientKeyExchange message:
+
+ClientKeyExchange:
+	•	Encrypt(Kserver, kpm)
+
+This message contains a value called the pre-master secret (kpm), encrypted using the server’s public key. This has almost always been an RSA public-key encryption in practice. Recall that RSA encryption is relatively efficient as the public exponent e can be chosen to be small (e.g. 3 or 65537). El Gamal and other public-key encryption algorithms have been supported, but rarely used in practice as they are more expensive for clients.
+
+With this style of key exchange, the client unilaterally picks the pre-master secret (used to derive every subsequent secret). It is meant to hash the server’s random value rserver with its own randomness to generate this, in case of a catastrophic randomness failure by the client, though there is no enforcement that client implementations actually do this.
+
+The advantage of this approach is efficiency, as this is the only message needed and RSA encryption is fast. The main disadvantage is that there is no forward secrecy: old sessions can be decrypted if the server’s private key is compromised at a later date.
+The modern paradigm: Diffie-Hellman-style key exchange
+With a Diffie-Hellman key exchange, immediately after sending the server certificate the server also sends a ServerKeyExchange message:
+
+ServerKeyExchange:
+	•	Server ephemeral DH share gs
+	•	Sign(Kserver, gs)
+
+This message contains a server-chosen Diffie-Hellman share that is specific to this session. The server signs the message to prove its authenticity to the client. The client then needs to respond with its own Diffie-Hellman share:
+
+ClientKeyExchange:
+	•	Client ephemeral DH share gc
+
+The client’s message is typically not signed. Both sides compute the pre-master secret km = H(gc·s), as is standard for a Diffie-Hellman exchange.
+One-sided authentication in TLS
+In a Diffie-Hellman style key exchange, only the server signs its DH share. In a RSA-style exchange, no signatures are used at all.
+
+Both achieve the goal of server authentication. The client can be sure it is talking to the server who knows the private key for Kserver, either because a signature was given or the server was able to decrypt the client’s public-key-encrypted message.
+
+At this point, the server has no idea who the client is, only that it has finished the key agreement with somebody. Client authentication is usually deferred to the application level, most commonly username/password authentication for HTTPS.
+
+Mutually-authenticated TLS also exists, in which the client adds a ClientCertificate message and uses the enclosed signing key to sign its ClientKeyExchange message (for either of the handshake paradigms). This is rarely used for HTTPS because it requires installing client certificates, though in some enterprise scenarios employees need to have client certificates for access to internal web resources. More commonly, client authentication is used in many non-HTTPS applications of TLS, such as encrypting connections between servers in a data center. The principles of mutually-authenticated TLS are the same, so we won’t discuss it further.
+Session finalization and key derivation
+After either style of handshake, the client computes its sending and receiving symmetric keys. First it derives the master secret by hashing the premaster secret with both random values (rclient and rserver) exchanged during the handshake. It then uses a key derivation function with different labels to derive encryption and MAC keys (if not using an integrated authenticated encryption mode) for both sending and receiving.
+
+The client then sends a short ChangeCipherSpec message (just a constant 6-byte string). This indicates “everything sent from here on out will be encrypted.” The client then sends a Finished message which is the first encrypted message. The client can then send its first data message (for example, an HTTP get request).
+
+The server derives the session keys in the same manner, and responds with its own ChangeCipherSpec and Finished messages. It doesn’t need to send them right away, it can wait until it actually has data to send (for example, an HTTP response).
+
+After this point, all data sent is encrypted and authenticated. While the abstraction to developers is a continuous stream of bytes (to match the TCP abstraction), data is actually split into records, each of which is encrypted/authenticated separately. Typically each record is sent in a separate TCP packet. Without records, authentication would not be possible until all data was sent, whereas in practice the TCP protocol is typically used by higher-layer applications to send bursts of data like HTTP requests/responses. Usually each application-level message is put into an individual record so that it can be authenticated as soon as it is received.
+Version downgrade attacks
+The protocol negotiation phase happened, by necessity, prior to the key exchange messages or any data encryption. This means that an active network attacker can modify this data. A classic attack strategy is a version downgrade attack:
+
+Client						Attacker					Server
+ClientHello:					ClientHello:
+Support up to TLS 1.3				Support up to SSL 3.0
+-------------------------->	  	  -------------------------->
+
+The server will respond by picking SSL 3.0 as the protocol, thinking that this is all the client supports. The client will assume that this was the highest version the server supports. The end result is a session over an older (potentially insecure) protocol, even if both ends support the latest (TLS 1.3 today).
+
+A similar downgrade attack can be done on the list of ciphersuites submitted by the client. The attacker can remove all but the weakest one, forcing the server to choose that. This is particularly risky as historically there were many intentionally weak ciphersuites which were designed to get around old US munitions export laws which restricted cryptographic software to 40-bit keys for export to certain countries. For example, older ciphersuites featured the cipher RC4-40, which is RC4 with a truncated key. 40-bit keys are easy to recover by brute force on a modern laptop.
+
+There were also special NULL ciphersuites, designed for testing or network experiments, which used no encryption at all.
+
+Fortunately there is a relatively simple fix deployed since TLS 1.0: in the Finished message, each side includes a hash of all of the messages in the handshake. That way, if either side sent a different message than the other side received, they can detect it at this stage before any actual data is sent. Note that this only works if both sides wait for the other side’s Finished message before proceeding. If the client starts sending data as soon as they send their own Finished message, these initial messages will be vulnerable to downgrades.
+
+Even after this fix was deployed, many browsers implemented HTTPS insecurely, against the advice of the official spec. For compatibility, if a server failed to respond to a ClientHello message over TLS, clients would re-try with SSL 3.0. This meant an attacker simply had to block TLS traffic to induce older SSL traffic.
+TLS vulnerabilities
+There have been many protocol vulnerabilities in various versions of TLS protocols. While each is a fascinating case study on protocol design and many have colorful names, they fall into a few general categories (notice some span several):
+	•	Downgrades to vulnerable crypto: As discussed, many older deployments relied on weak crypto algorithms for a variety of legal, performance, or other reasons. Attacker-forced downgrades can then be exploited to attack these weak algorithms: FREAK (RSA with 512-bit keys), Logjam (Diffie Hellman with a 512-bit prime), DROWN (SSL 2.0 with 40-bit symmetric keys), SLOTH (the broken MD5 hash function), SWEET32 (64-bit block ciphers)
+	•	State machine confusion: TLS is a very complicated protocol, particularly with session resumption, ciphersuite renegotiation and other features. Many common implementations have bugs where a server can accept messages it shouldn’t based the on the current state: SKIP, FREAK, Triple Handshake
+	•	Timing attacks: In some cases the time taken by a server to respond to a request reveals sensitive information. A classic example was factoring RSA keys by carefully timing server responses. A more persistent example has been CBC padding oracle attacks, which rely on varied response time if a CBC decryption produces a message with invalid padding (Lucky13, POODLE and variants). A related idea is Bleichenbacher’s padding oracle attack on RSA (ROBOT).
+	•	Compression: The amount that a message compresses can be used by an attacker who insert some amount of known traffic next to unknown data and sees how much the resulting records are compressed (BREACH, CRIME)
+	•	Broken crypto: Few attacks actually break a crypto algorithm which is still widely used. The one main example is RC4 which was broken in practice while still actively being used (Bar Mitzvah, NOMORE)
+Optimizing performance: session resumption
+A single TLS “session” is traditionally quite short-lived. A common case is a browser loading a web page, in which the initial page load and all subresource loads (e.g. loading scripts and images) are separate sessions from the point of view of TLS. Another common case is a user browsing many pages at a single web server. It would be quite wasteful to repeat the TLS handshake for every one of these “sessions”. Thus TLS uses session resumption to skip the expensive setup for repeat connections. 
+
+The first approach (dating to SSL 3.0) is session IDs, which servers can specify in the ServerHello message. Clients and servers must both store the session ID and associate master secret for use in future sessions. Clients can then send their session ID in the  ClientHello for future connections. If the server has this session ID stored, they respond with the same session ID in their ServerHello message. Both sides then know they can skip the key exchange messages and go right to encrypted communication, re-deriving keys from the master secret both have remembered.
+
+The downside of using session IDs is that the server must store a table of master secrets for past connections, many of which may never return to the server. In the worst case, this can leave the server vulnerable to denial-of-service (DoS) attacks, something we’ll cover in more detail later. An attacker can try opening many TLS sessions with a server in a row, causing it to exhaust its memory with many session IDs that will never be needed again.
+
+This risk (as well as the complexity of synchronizing session IDs between multiple servers used for load-balancing in a website) led to the development of session tickets in RFC 5077. Session tickets work like session IDs, except that instead of a random number the server computes an authenticated encryption of the master secret using a session-ticket encryption key known only by the server. The ticket includes the chosen ciphersuite and other data like an expiration time. Clients store and submit tickets just like they would with session IDs. The advantage is that servers don’t need to store session tickets: when a client sends a ticket the server can decrypt (and authenticate) it to recover the master secret. Session tickets are preferred for this reason, although they are slightly larger to transmit and store (for clients).
+
+Session resumption and forward secrecy: Session resumption has a security downside: it limits forward secrecy. Without session resumption, both client and server can discard their symmetric keys as soon as the session ends, providing immunity against any compromise from that point in time forward. With either session tickets or session resumption, key material is kept around for use in future sessions. 
+
+With session IDs, both client and server store a table of master keys. If stolen, this can be used to hijack any future connection using these keys. Similarly with session tickets, clients store a table of master keys and the server stores the session-ticket encryption key. This key is particularly damaging if stolen since it can be used to decrypt any sessions established using this ticket.
+
+As a result, it is important for security to limit how long these values are stored. Forward secrecy is only achieved after the client discards its cached master key and the server discards either its cached master key (using session IDs) or session ticket-encryption key (using session tickets).
+The latest: TLS 1.3
+10 years after TLS 1.2 was standardized in 2008, TLS 1.3 was standardized in 2018. The design of TLS 1.3 is heavily influenced by the many bugs found in the interim period. One major lesson was that complexity led to buggy and incomplete implementations as well as overlooked vulnerabilities. 
+
+TLS 1.3 completely removed a number of features that led to bugs, such as renegotiation and compression. Gone is the old RSA-style handshake mode which lacked forward secrecy. TLS 1.3 also dropped the old crypto algorithms DES, RC4, SHA1 and MD5, as well as CBC encryption mode. In fact, TLS 1.3 defines only 5 ciphersuites, (where previous versions had dozens or hundreds):
+
+	•	TLS_AES_128_GCM_SHA256
+	•	TLS_AES_256_GCM_SHA384
+	•	TLS_CHACHA20_POLY1305_SHA256
+	•	TLS_AES_128_CCM_SHA256
+	•	TLS_AES_128_CCM_8_SHA256  
+
+Notice that TLS 1.3 ciphersuites don’t specify a key exchange algorithm-elliptic curve Diffie-Hellman (ECDHE) is the only option.
+
+TLS 1.3 also takes several steps to improve performance. For a long time, site administrators were reluctant to deploy HTTPS for fear of slowing down connections and increasing page load times. Moore’s Law and specific improvements in crypto efficiency (including dedicated hardware instructions for AES on modern Intel processors) have made the cost of symmetric encryption negligible. This means there is almost no performance impact after the handshake is complete.
+
+TLS handshakes still add latency, however, as the protocol requires several rounds of communication between the client and the server. Protocol designers often speak of the number of round-trips added to a connection before actual data can be exchanged.
+
+TLS 1.2 required at least 2 round trips before data can be sent, in large part because protocol negotiation was required before key-exchange messages. TLS 1.3 reduces the handshake to 1 round trip through a simple optimization: the client simply picks (public) elliptic curve parameters to use and immediately sends its ClientKeyExchange message after its ClientHello. The server then responds with its ServerHello and ServerKeyExchange, choosing a symmetric ciphersuite (which now only specifies symmetric algorithms). The client is then ready to send data.
+
+0-RTT connections and security caveats: TLS 1.3 even offers support for “0-RTT” (zero round-trip-time) connections in which the client sends encrypted data in its very first message, if the session is being resumed. TLS 1.3 calls this “pre-shared key” mode, but it is essentially the same as session IDs/tickets from 1.2 and earlier (both modes are supported).
+
+0-RTT is the ultimate in terms of low-latency connections. However, there is a caveat: in addition to the normal forward-secrecy concerns of session resumption, 0-RTT connections are vulnerable to a replay attack. Since the client sends data before hearing anything from the server, it is possible for an adversary to capture such a connection and replay it exactly.
+
+In some scenarios, this could be dangerous. For example, what if the 0-RTT connection were to a URL such as:
+
+http://www.example.com/transfer_money?amount=100&recipient=mallory
+
+If loading this resource has the effect of transferring money, then it would be dangerous to replay this message. As a result, 0-RTT connections are supported with the caveat that servers should only accept them for idempotent (having no effect if done more than once) actions. Most server implementations only accept them for simple GET requests. This was a somewhat controversial design decision as it requires application designers to be aware of low-level protocol details.

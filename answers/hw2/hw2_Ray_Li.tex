@@ -1,0 +1,94 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\title{HW 2 Answers - Ray Li}
+\author{CSCI-UA.0480-63}
+\date{\today}
+\begin{document}
+\maketitle
+
+
+\section*{1. Public key crypto at toy security levels}
+\subsection*{(a) $p=10007$, $g=3$}
+\begin{enumerate}[leftmargin=*]
+  \item Order of $g$ mod $p$: $5003$.
+  \item Shamir three-pass with $m=1337$, $a=2461$, $b=4319$:
+  \begin{itemize}
+    \item $a^{-1} \bmod (p-1)=7103$, $b^{-1} \bmod (p-1)=5259$.
+    \item Transmissions: $x_1=m^a\bmod p=792$, $x_2=x_1^b\bmod p=1441$, $x_3=x_2^{a^{-1}}\bmod p=5629$ (Bob recovers $m$ by raising to $b^{-1}$).
+  \end{itemize}
+  \item Diffie–Hellman with $a=2461$, $b=4319$:
+  \begin{itemize}
+    \item $A=g^a\bmod p=5974$, $B=g^b\bmod p=7413$, shared secret $s=B^a\bmod p=A^b\bmod p=6122$.
+  \end{itemize}
+\end{enumerate}
+
+\subsection*{(b) RSA with $p=383$, $q=401$}
+\begin{enumerate}[leftmargin=*]
+  \item $\varphi(N)=(p-1)(q-1)=152800$.
+  \item With $e=11$, the private exponent $d\equiv e^{-1}\bmod \varphi(N)=13891$.
+  \item Encrypting $1337$: $c=m^e\bmod N=113846$.
+  \item Signing $1337$: $\sigma=m^d\bmod N=101732$.
+\end{enumerate}
+
+
+\section*{2. Digital signatures}
+Most signature schemes sign a fixed-size value (usually a hash). If Alice signs each 1024-bit block with DSA and concatenates the signatures, it is insecure.
+
+\subsection*{Why this is insecure}
+- Without hashing, the scheme is malleable. An attacker can splice blocks from two messages that Alice signed and produce a new message whose per-block signatures all verify.
+- There is no binding across blocks. DSA.Sign($m_1$) $\Vert$ DSA.Sign($m_2$) does not prove Alice signed the whole message—only that she once signed each block individually, possibly in a different context.
+- Length and formatting are not covered. Reordering, deleting, or duplicating blocks still passes verification.
+
+\subsection*{Concrete forgery}
+Suppose Alice signed two distinct 1024-bit blocks x and y, producing ($\sigma_x$, $\sigma_y$). Consider the forged message M' = $x$ $\Vert$ $y$. Its “signature” $\sigma' = \sigma_x \Vert \sigma_y$ verifies under Alice’s key on M' in this broken scheme, even if Alice never signed M' as a whole. More generally, if Alice signed blocks x1,…,xk at any time, an attacker can assemble any message made of those blocks and concatenate the corresponding signatures, yielding a valid-looking overall signature.
+
+\subsection*{Fix}
+Sign a collision-resistant hash of the whole message: $\sigma = \mathrm{Sign}(H(M))$. This binds all content, order, and length into one digest and prevents block-wise cut-and-paste.
+
+
+
+
+
+\section*{3. Signatures with related secret values}
+We look at El Gamal signatures with $r=g^y\pmod p$ and $s=(m-rx)\cdot y^{-1}\pmod{p-1}$. If two different messages $m_1\ne m_2$ are signed using the same nonce $y$ (so the same $r$), we can recover the private key $x$ as follows.
+
+\subsection*{Attack when the same $r$ is reused}
+Given $(r,s_1)$ on $m_1$ and $(r,s_2)$ on $m_2$:
+\begin{align*}
+ s_1 &\equiv (m_1-rx)\cdot y^{-1} \pmod{p-1} \\
+ s_2 &\equiv (m_2-rx)\cdot y^{-1} \pmod{p-1}
+\end{align*}
+Subtract the equations to eliminate $x$:
+\[ (s_1-s_2) \equiv (m_1-m_2)\cdot y^{-1} \pmod{p-1}. \]
+Provided $\gcd(s_1-s_2,p-1)=1$, invert to get
+\[ y \equiv (m_1-m_2)\cdot (s_1-s_2)^{-1} \pmod{p-1}. \]
+Plug back (e.g., into the first) to solve for $x$:
+\[ rx \equiv m_1 - s_1 y \pmod{p-1} \quad\Rightarrow\quad x \equiv r^{-1}\cdot (m_1 - s_1 y) \pmod{p-1}. \]
+So, if you reuse the signing nonce, the secret key can be found.
+
+
+
+
+
+
+\section*{4. Reductions: CDH implies DDH}
+We are given an oracle $A_{\mathrm{CDH}}$ that on input $(g,p,g^a, g^b)$ outputs $g^{ab}$ with probability $P$ (non-negligible). Construct a distinguisher $A_{\mathrm{DDH}}$ for inputs $(g,p,g^a,g^b,h)$:
+
+\subsection*{Distinguisher $A_{\mathrm{DDH}}$}
+\begin{enumerate}[leftmargin=*]
+  \item Query $A_{\mathrm{CDH}}$ on $(g,p,g^a,g^b)$ to obtain $z$.
+  \item Compare $z$ to $h$. If $z = h$, output “DDH instance is real” (i.e., $h=g^{ab}$); otherwise output “random”.
+\end{enumerate}
+
+\subsection*{Correctness and advantage}
+If the instance is real ($h=g^{ab}$), then with probability $P$ we have $z=g^{ab}=h$ and $A_{\mathrm{DDH}}$ outputs “real”; otherwise it guesses “random”. If the instance is random ($h\leftarrow \mathrm{Z}_p^*$), then $z=g^{ab}$ is independent of $h$, so $\Pr[z=h] = 1/(p-1)$ (negligible), and $A_{\mathrm{DDH}}$ outputs “random” with overwhelming probability. Overall,
+\[ \Pr[\text{output real }|\ h=g^{ab}] \ge P,\qquad \Pr[\text{output real }|\ h\leftarrow \mathrm{Z}_p^*] \approx 0. \]
+Thus $A_{\mathrm{DDH}}$ distinguishes with advantage at least $P - 1/(p-1)$ over $1/2$, which is non-negligible. Therefore, if CDH is easy, then DDH is easy; contrapositive: if DDH is hard, then CDH is at least as hard (CDH implies DDH, CDH is the stronger assumption).
+
+
+
+
+\end{document}

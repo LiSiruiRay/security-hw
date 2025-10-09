@@ -1,0 +1,170 @@
+ocurrChapter 4: Cryptocurrency and blockchains
+Suggested reading:
+	•	Bitcoin and Cryptocurrency technologies Chapters 1.2, 1.4, 1.5 and Chapter 2
+More detailed reading:
+	•	Bitcoin and Cryptocurrency technologies Chapter 3
+Bonus reading:
+	•	Bitcoin: A Peer-to-Peer Electronic Cash System by Satoshi Nakamoto
+
+We’ll conclude studying applications of cryptography with a fun application that has received a huge amount of attention recently: cryptocurrency.
+
+Bitcoin was launched in early 2009, but it actually only uses relatively simple cryptography concepts like hash functions and digital signatures that were available by the late 1970s. The concept of a public ledger, and a blockchain specifically, was proposed in the early 1990s.
+
+Bitcoin is very complex (and follow-up systems like Ethereum are even more complex) and you could take an entire course on it. In fact, NYU offers such a course and I teach it! But for this course we’ll discuss the basic concepts in a single lecture.
+Digital signatures as assent
+So far, we have looked at digital signatures as a way to authenticate messages during key exchange or secure communication. We briefly touched on the idea of signatures for authentication without secrecy, such as a software developer signing binaries that it publishes so users can verify that they are installing genuine software.
+
+Digital signatures also provide a natural way for somebody to agree to some transaction or contract: Alice issues a digital signature saying “I, Alice, agree to this contract.”  Interestingly, this closely maps to the other use of traditional, handwritten signatures, to agree to a contract by signing it. Legally speaking this is called assent.
+
+This works because signatures are non-repudiable. That is, if Alice signs a message M using her private key, then anybody who has her signature σ on M can prove that Alice, or at least somebody who knows Alice’s private key, signed the message. Of course, Alice can always claim her key was stolen.
+Digital cash from digital signatures (an insecure attempt)
+We can use this notion of digital signatures proving assent to build a very simple digital cash system. First, designate some party as the mint which has the authority to issue new units of currency. We’ll call them coins. In most countries, only official government mints can issue currency and this is regulated by using fancy printing techniques and assuming nobody else can copy them exactly.
+
+To issue digital cash, we just use digital signatures. The mint’s public key Kmint is used to authenticate new coins. When the mint wants to issue a coin, it creates a digital signature as follows:
+
+c1={serial_number: 10983498, value: $1, owner: KGov}, σ1=Sign(Kmint, c1)
+
+This new coin has a specific serial number and value, and is assigned to the owner KGov. Everybody can see that this coin is valid because it is signed by the mint. Eventually, the government may want to ‘spend” this coin by transferring it to another owner. To do so, another signature is needed:
+
+c2={previous: H(c1), new_owner: KAlice}, σ2=Sign(KGov, c2)
+
+By signing this message, the coin’s previous owner (the government) has assented to a transfer to Alice. Alice can use this signature to prove to anybody else that she genuinely owns the coin. To prove to Bob that she owns the coin, Alice needs to show him (c1, σ1, c2, σ2) and Bob needs to check all of the following:
+
+	•	(c1, σ1) is a valid signature by Kmint (always required for coin creation)
+	•	c2 contains a hash of the previous value c1
+	•	(c2, σ2) is a valid signature by the owner of c1 (KGov in this case)
+
+This process can be used to validate a coin after an arbitrary number of exchanges by repeating steps 2-3. In general a coin will be a series of values ci, σi tracking the history of owners, with each coin ci containing a hash of the previous coin. This can be viewed as a linked list tracking previous owners.
+The double-spending problem
+There is a fundamental problem with the above approach. Imagine Alice sends Bob the value c3={previous: H(c2), new_owner: KBob}, σ3=Sign(KAlice, c3). Bob can use this to prove to anybody else that Alice transferred ownership to him. But he can’t prevent Alice from creating another version, say c3’={previous: H(c2), new_owner: KCarol}, σ3=Sign(KAlice, c3’), and sending it to Carol.
+
+If Bob and Carol don’t communicate with each other, they’ll both be under the impression that Alice sent her coin to them. This is called a double-spending attack and it’s a problem that any currency system needs to solve. For physical currency, this problem is solved by using a physical object that is designed to be hard to duplicate. Digital currency on the other hand is inherently easy to copy.
+
+The above system is a straw man that makes no attempt to prevent double-spending (or more generally, repeated spending many times), so it cannot be used in practice.
+Detecting double-spending with an append-only public log
+Bitcoin, and most other modern cryptocurrencies, prevent double-spending in a conceptually straightforward manner: all transactions are recorded in an append-only public log.
+
+The log L is an ordered list of transactions L = c1, c2, ... for all users in the system with the following properties:
+	•	Public: every party can read the log and they all agree on its value.
+	•	Append-only: any party can write data to the log (for a fee), but once data is written it is never deleted. For any version numbers i<j, the value log Lj contains everything in log Li, in the same order, plus new data appended to the end.
+	•	Log: there is a total ordering of data in the log.
+
+Assuming that we can build such a log, it makes detecting double-spending easy: when Bob receives Alice’s coin, he immediately searches the log for evidence that Alice has already sent it to somebody else. If so, he knows the coin has already been spent. If not, he writes the new coin to the end of the log, so that if anybody else receives a version (Carol in the above example) they can tell that Bob has already taken ownership. The system becomes a bit more efficient if the log refuses to include a second attempt to transfer the coin (rather than allowing it and having it be ignored).
+Splitting and merging value: the UTXO model
+The above presentation is close to how Bitcoin tracks coin ownership, except so far we have implemented an atomic coin (or token) that maintains its value forever (like physical coins or banknotes do). This can be inefficient if we need to transfer a lot of coins (and receive change), requiring a signature on each one.
+
+Instead we can extend this to allow splitting and merging value:
+
+t1={inputs: ∅, outputs: [(value: $1, owner: KGov)]}
+σ1=[Sign(Kmint, t1)]
+
+t2={inputs: [(H(t1), 1)],
+      outputs: [(value: $0.75, owner: KAlice), (value: $0.25, owner: KBob),]},
+σ2=[Sign(KGov, t2)]
+
+Notice we’re now calling each item ti instead of ci. The basic unit is a transaction. Each transaction is a list of inputs (previous coins) and outputs (newly created coins). Transaction 1, like before, creates a new coin worth $1 and assigns ownership to KGov. Transaction 2 is more interesting though-it takes the $1 coin and splits it into two coins worth $0.75 (owned by KAlice) and $0.25 (owned by KBob).
+
+We can also make a transaction with multiple inputs which merges value:
+
+t3={inputs: [(H(t2), 1), (H(t2), 2)],
+      outputs: [(value: $0.55, owner: KAlice), (value: $0.45, owner: KCarol),]},
+σ3=[Sign(KAlice, t3), Sign(KBob, t3)]
+
+This transaction has two inputs-specifically output #1 and output #2 from t2. It then creates two outputs. Notice that Alice spent an output worth $0.75 and created a new output assigned to her key worth $0.55. In sum, she spent $0.20. Note that it isn’t possible for Alice to simply spend only $0.20 of her previous transaction output—each transaction output can be spent only once. Similarly, Bob spent his entire $0.25. 
+
+A signature is needed from both Alice and Bob to validate this transaction, since both are spending money. The transaction validation algorithm now looks like:
+	•	Check that a valid signature exists on ti with the key from every input transaction.
+	•	Check that the total value of all outputs is equal to the total value of all inputs 
+	•	Recursively verify that all input transactions are valid by repeating steps 1-2 or checking for a valid signature from the mint.
+
+Because transactions can spend outputs from multiple prior transactions, and also produce outputs which are spent in multiple future transactions, they no longer form a simple chain but a transaction graph. We know that the graph will actually be a directed acyclic graph or DAG (the use of a secure cryptographic hash function precludes the possibility of cycles), but it is more commonly called a transaction graph.
+
+Note that the recursive validation might get quite expensive. Instead, validators typically cache the results of prior validation and maintain a set of unspent transaction outputs (UTXOs). The set of unspent transaction outputs defines exactly which parties own how much money in the system.
+A centralized append-only log
+The simplest way to build an append-only log (as is usually the case in cryptography) is to designate a trusted third-party to run the log. They can collect transactions from others and add them to the log, signing it to authenticate valid versions of the log with some special key Klog
+
+ L1 = {t1},  σ1 = Sign(Klog, L1)
+ L2 = {t1, t2},  σ2 = Sign(Klog, L2)
+ L3 = {t1, t2, t3},  σ3 = Sign(Klog, L3)
+...
+
+Of course, this is not very efficient. Verifying each version of the log requires checking a signature on the entire contents of the log (they’ll be hashed of course, but still this requires a linear amount of work). We can use the same approach we used above with individual coins or transactions:
+
+ L1 = {previous: ∅, new: [t1]},  σ1 = Sign(Klog, L1)
+ L2 = {previous: H(L1), new: [t2, t3]},  σ2 = Sign(Klog, L2)
+ L3 = {previous:  H(L2), new: [t4, t5, t6, t7, t8]},  σ3 = Sign(Klog, L3)
+
+Note two changes here: each update to the log now adds an ordered list of new transactions (instead of just a single transaction) and each version contains a hash of the previous version of the log, rather than duplicating all transactions.
+
+The set of transactions added with each update to the log is called a block of transactions. Each block is chained to the previous block by including its hash. Hence the entire structure is called a blockchain. Interestingly, this term did not appear in the original Bitcoin proposal, and the general concept was proposed in the early 1990s as a way to build an efficient append-only log.
+Committing properties of a blockchain
+Each block in the chain includes a hash of the previous block. Clients only need to know the most recent block (sometimes called the head or the root) to track the history of the entire system. If they wish to check the value of a previous block then they’ll need some place to fetch it from, but this doesn’t need to be trusted.
+
+Notice that if you know the current head block Li, then you know the hash of its predecessor, H(Li-1). If a server tells you that the value of the previous block is Li-1, you can check by hashing it and seeing if you get the same hash contained in Li. Nobody should be able to find an alternate value L’i-1 with the same block: this would be a collision in the hash function.
+
+Thus we say that Li commits to its predecessor Li-1. Recursively, Li-1 also commits to Li-2 and so on all the way back to the initial block L1 (called the genesis block). Thus, as long as you know the head Li, you can check that any previous block Lj is part of the blockchain by following the hash chain. This requires downloading and hashing each of the i-j blocks between the two, which may not be cheap for a long blockchain (Bitcoin’s blockchain already has over one million blocks, for example).
+
+There is a parallel between a blockchain and a classic linked list. With a linked list, you only need to store the head of the list and you can traverse to any other item (at a linear cost). With a blockchain, you only need to know the head block and you can be sure that any other block is a valid member of the chain (at a linear cost). With a linked list, you use pointers to look up blocks in memory. A more technical term for a blockchain is an authenticated linked list.
+Merkle trees
+The blockchain data structure is not particularly efficient, requiring a linear amount of work to verify that a particular block is part of a chain leading to the current (known) head. Typically, bitcoin clients are expected to have the entire set of block headers stored and pre-validated.
+
+But could we do better? Yes! You may recall that a linked list is not nearly as efficient as a binary tree for large data sets. It’s possible to build an authenticated binary tree much the same as a blockchain is an authenticated linked list. An authenticated binary tree is traditionally called a Merkle tree after its inventor, Ralph Merkle.
+
+Bitcoin uses a Merkle tree to commit to the list of transactions {t1, t2, t3, ... tn} in each block as follows (in this example there are 8 transactions):
+
+t1	t2	t3	t4	t5	t6	t7	t8
+x1		x2		x3		x4
+x5				x6
+x7 (root)
+
+The arrows in this diagram indicate hashing. For example, the intermediate node x1 is computed as H(t1‖t2) and the node x6 is computed as H(x3‖x4). Just like with blocks in a blockchain, each node in a Merkle tree commits to its children. It is impossible to find any different pair of child nodes that will produce the same hash, because that would be a collision. Because the tree structure is recursive, each node actually commits to its entire left and right subtrees and the root node commits to the entire structure.
+
+Notice that a Merkle tree is really just a binary tree like you learned in data structures class. The only difference is that instead of each node having a pointer to where its child nodes are stored in memory, each node is the hash of its two child nodes. To anybody who knows the root, we can prove inclusion of any leaf node by providing a Merkle proof (or Merkle inclusion proof). The proof consists of all neighbors on the path to the root. For example, to prove that transaction t4 is included in the tree above, we would provide t3 which allows the proof verifier to recompute x2, then x1 which the verifier uses to compute x5, and finally x6 which the verifier uses to re-compute the root and check against their stored value. This proof will require Θ(lg n) items for a tree with n data items, and take Θ(lg n) hashes to verify.
+
+In the case of Bitcoin this tree is not a binary search tree. The order of the transactions matters and is interpreted as the order in which transactions were included in the log.
+General authenticated data structures
+The basic idea behind blockchains and Merkle trees is quite powerful. We can take any classic pointer-based data structure and replace the pointers with hashes to get an authenticated data structure. As we’ve seen a blockchain is really an authenticated linked list and a Merkle tree is an authenticated binary tree. The full Bitcoin blockchain is a hybrid of the two: a linked list of blocks, each block containing the root of a Merkle tree of transactions (typically a few thousand transactions per block). Other authenticated data structures exist (such as authenticated skip lists) but these two are by far the two most common. Bitcoin’s transaction graph can also be viewed as an authenticated data structure.
+
+The one restriction is that authenticated data structures must be acyclic in their references. A singly linked list works, but a doubly linked list is impossible, since we can’t find two blocks that both include the hash of the other.
+The risk of centralization
+If we build a log using Bitcoin’s structure, a blockchain of Merkle tree roots of transactions, but rely on a centralized party (the “log signer”) to authenticate valid blocks, what can go wrong?
+
+The log signer is a single point-of-failure. If they stop adding new blocks (either because they are hacked, or crash, or simply decide to cease service), then no new transactions can be added to the log and nobody can make a payment.
+
+They also have the power to censor a targeted user by refusing to provide service to them specifically (refusing to publish any transactions involving that user’s key). Freezing assets is a tool often used by governments against targets of criminal investigations, alleged terrorist organizations, and so forth.
+
+The log signer might also demand high fees to provide service. Being able to write data to the blockchain is valuable, since it allows payments to be executed. If the log signer has a monopoly on this resource, they can set fees as they wish.
+
+Most importantly, the log signer may fork the blockchain by signing two different blocks for a specific location (or “height”) in the chain:
+
+b1
+b2
+b3
+b’4
+b4
+b’5
+b5
+
+If the log signer committed different sets of transactions in blocks b4 and b’4, this would cause real trouble. For example, if she sends b4 to Alice b’4 to Bob, the log signer can cause each to accept a payment of the same coin, executing a double spend.
+
+The good news is this attack is likely to be detected eventually, because the log signer will have to maintain separate chains to show Alice and Bob for the rest of time. It’s not possible to merge a forked chain, as this would require a hash collision. If Alice and Bob ever communicate with each other and share their view of the current blockchain head, they’ll detect that the log server has cheated.
+
+The log server also can’t outright spend other users’ coins-the unforgeability of the signature scheme prevents that. Still, this is a lot of trust to place in the block signer. One of the main goals in most cryptocurrencies is to achieve decentralization, or the avoidance of trust in any single entity.
+Bitcoin’s solution: proof-of-work
+A simple evolution of a centrally signed log is to have a group of k log signers and require the majority to sign any block. This provides some resilience against one signer going offline, and also requires a majority to conclude to fork and double spend. Who should the k signers be though? It’s difficult to choose a set everybody can agree on.
+
+Bitcoin introduced a radical approach in 2008: allow anybody to join the set of blockchain maintainers. This is called an open participation protocol. This seems dangerous, as an attacker might try to create many fake identities to appear to act as a majority of the set of maintainers. These fake identities controlled by a single attacker are called sybils, a concept which comes up in many other security applications.
+
+To mitigate this risk, Bitcoin makes it computationally expensive to participate in the protocol. Specifically, adding a block to the chain requires solving a difficult computational puzzle. This is also called proof-of-work because you have to prove you have invested computational resources for the privilege of adding a block.
+
+Bitcoin’s puzzle is very simple. For a block to be valid in Bitcoin it is necessary that:
+
+SHA-256(block) < 2256-d
+
+where d is a parameter controlling the puzzle difficulty. Another way of viewing this is that the hash must start with d consecutive zero bits. For a hash function like SHA-256, we don’t know of any algorithm to find such a block besides simply trying many possible candidates randomly. With probability 2-d any candidate will be a valid block. 
+
+Currently d>70, so it is a huge amount of work to find a block. A typical laptop can perform around 220 SHA-256 operations per second, so it would take over 250 seconds (or over 10 million years) to solve the puzzle on a laptop. The process is dominated by industrial miners using thousands of custom hardware chips.
+
+Why do minutes do all of this work? A clever innovation of Bitcoin was to incentivize participants (called miners) to solve this puzzle by rewarding them with new coins. As of early 2023, a reward of about 6.25 bitcoins (or US$150,000) is created by the miner who finds each block, and a block is found on average every 10 minutes (the difficulty d is adjusted to ensure this).
+
+Finally, what keeps the miners from forking the chain to double spend? The incentives are quite complicated, but the default rule is that miners work to extend the longest version of the blockchain they are aware of. This means that forking would require finding more blocks than the “honest” coalition of the miners following this longest-chain rule. This means the chain should not fork as long as a majority of miners are honest.

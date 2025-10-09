@@ -1,0 +1,269 @@
+Chapter 6: Asymmetric cryptography: Encryption, key exchange and the discrete log problem
+Suggested reading:
+	•	Security Engineering Chapters 5.3.4, 5.7.2, 5.7.4
+	•	Basic number theory fact sheet: Arithmetic modulo primes
+Advanced crypto reading:
+	•	GCAC Chapter 10 (public key tools)
+	•	GCAC Chapter 11 (public key encryption)
+	•	GCAC Chapter 15 (elliptic curves)
+	•	The past, evolving present and future of Discrete Logarithm
+	•	The Cramer-Shoup cryptosystem
+Bonus reading:
+	•	Weak Diffie-Hellman keys in practice
+	•	Elliptic Curve Cryptography: A Gentle Introduction
+	•	An introduction to Curve25519
+Throughout the rest of this class, we’ll typically assume parties with shared keys can use authenticated encryption to set up a secure channel. In a secure channel, all communication is protected by authenticated encryption to ensure integrity and confidentiality. The only problem to solve now is ensuring all participants in the channel share secret keys. As the saying goes:
+Symmetric cryptography reduces security to key distribution.
+
+So far we’ve assumed that Alice and Bob have met in advance to share keys. This is reasonable in traditional encryption scenarios, such as military and diplomatic communication, where most communication partners are known in advance.
+
+On the Internet, this assumption no longer holds. Billions of computers exist and need to spontaneously set up secure channels with each other. How does Alice’s browser establish a shared secret key with a new web server (say bob.com) when she visits for the first time? Or if Alice adds Bob as a friend on WhatsApp, how does her phone establish a shared key with Bob’s phone?
+
+These are both examples of the key distribution problem.
+Centralized models: Kerberos
+A straightforward solution that is still sometimes used is a centralized key server. This is sometimes called the Kerberos model after the Kerberos protocol, the most successful deployment of the idea (which is still in use in some enterprise networks).
+
+Kerberos is designed for a scenario where N principals (say, company employees) may wish to communicate. It would be inefficient to pre-establish shared keys between all pairs that might communicate, requiring O(N2) keys. It would also be inconvenient to maintain this when new principals join the system. 
+
+Instead, every principal maintains just one shared secret key with a special party called the key server, established when each principal joins the system. This key might be manually shared (for example by going into an enrollment office) or derived from a password. In any case, we assume Alice establishes shared key kAS with the key server, Bob has shared key kBS and so forth.
+
+When Alice wants to set up a secure channel with Bob, she creates a key kAB. But she can’t just send it to Bob, because she has no shared key with Bob and hence can’t establish a secure channel. Instead, she sends it to the key server who re-encrypts it with Bob’s key, and then she forwards that encrypted key (called a ticket) to Bob:
+
+Bob						Alice					Key server
+							 I’d like to talk to Bob with kAB
+------------------------------------>
+     (secure channel w/ kAS)
+
+							          here’s your ticket:
+  AE(kBS, kAB ║A ║B ║ time)
+<-----------------------------------
+      (secure channel w/ kAS)
+
+           AE(kBS, kAB ║A ║B ║ time)
+          <- - - - - - - - - - - - - - - - - - -
+                (insecure channel)
+
+                            Hi Alice!
+          ---------------------------------->
+                (secure channel w/ kAB)
+
+Bob receives the ticket, decrypts it and uses the enclosed key to communicate over a new secure channel with Alice. He can be assured it’s a genuine ticket because of the use of authenticated encryption with the key server’s pre-shared key with Bob. There is a lot more complexity to the full Kerberos protocol, such as checking timestamps and periodically rotating keys, but this is the basic idea.
+
+The downside is clear: the key server learns everybody’s secret keys, so there is no privacy (or integrity) against a malicious key server. In some scenarios, like corporate email, this might be considered a feature in that it allows corporate admins to read all employee’s communication. In most cases it is a huge drawback. Cryptographers generally try to avoid such trusted third parties.
+
+The key server is also a single-point-of-failure for reliability. If the server goes down, no new key exchanges can happen until it is back up.
+Towards public-key crypto: the dual locks metaphor
+Instead, we’d like a protocol for Alice and Bob to speak directly over an insecure channel and establish a shared key using a key exchange protocol. For a long time this seemed impossible: if they only communicate over an insecure channel that an eavesdropper can observe, how can they keep their newly shared key secret??
+
+There are a few offline analogies for key exchange protocols. One is the dual locks metaphor. Imagine Alice wants to send Bob a lockbox in the mail with sensitive contents. Further imagine this lockbox has two independent hasps (a hasp is the metal plate a padlock attaches to). If either hasp is locked, the box won’t open.
+
+Alice attaches her own lock to one hasp and mails the box to Bob. Bob receives it but can’t open it yet (since he doesn’t have Alice’s key). So he attaches his own lock to the other hasp and mails it back to Alice. Alice then removes her lock and mails the box back to Bob, who can finally remove his own lock and open the box. Note that the box was never mailed (sent through an insecure channel) without a lock on it. A video demonstration might help visualize this idea.
+
+This is an interesting protocol and we could try to apply it directly with encryption. Unfortunately, symmetric encryption algorithms like AES don’t commute. That is, if Alice encrypts and then Bob encrypts, we’re left with some ciphertext cAB = Encrypt(kB, Encrypt(kA, m)). Alice can’t remove her inner encryption to get Encrypt(kB, m). This works with locked boxes, but not encryption.
+
+Stream ciphers (or one-time pads) do commute! But this protocol would not be secure. To see why, suppose Alice encrypts by xoring with keystream kA and Bob encrypts by xoring with keystream kB. The resulting protocol would be:
+
+Alice						Bob
+c1 = m ⊕ kA
+------------------------------------>
+c2 = c1 ⊕ kB
+<-----------------------------------
+c3 = c2 ⊕ kA
+------------------------------------>
+
+This protocol would “work”: Bob can recover the message m by computing:
+c3 ⊕ kB 	= (c2 ⊕ kA) ⊕ kB
+= ((c1 ⊕ kB) ⊕ kA) ⊕ kB
+= (((m ⊕ kA) ⊕ kB) ⊕ kA) ⊕ kB
+    = m
+
+But note that this scheme is trivially insecure. The adversary can easily compute kB = c2 ⊕ c1 (or kA = c2 ⊕ c3) and use either to recover the message. To make this idea work, we’ll need to use a totally different type of math to encrypt.
+Shamir’s three-pass protocol
+The above attempt works because xor is commutative, but is insecure because xor is self-canceling: x ⊕ y ⊕ y=x. Instead, we can use exponentiation, which commutes but is not self-canceling. This idea, originally proposed by Adi Shamir, works as follows. Suppose Alice wants to send a message to Bob which is a secret integer m:
+
+Alice						Bob
+Pick random number a				Pick random number b
+c1 = ma
+------------------------------------>
+c2 = c1b
+<-----------------------------------
+c3 = a√c2
+------------------------------------>
+Bob can recover the message by computing:
+ b√c3 	= b√(a√c2)
+	= b√(a√(c1b))
+= b√(a√((ma)b))
+= ab√(mab)
+= m
+Unfortunately, as presented, with computation over the integers, this is still insecure, because the attacker can compute the secret value b via the following logarithm:
+				b = logc1(c2)
+
+Recall that this logarithm solves exactly for b in the equation c2 = c1b. Because logarithms are easy to compute over the integers (or reals), this scheme is still insecure. But it can be fixed with a very small change: instead of computing over the integers, each computation is done modulo p for a large prime number p:
+
+Alice						Bob
+Pick random number a				Pick random number b
+c1 = ma (mod p)
+------------------------------------>
+c2 = c1b  (mod p)
+<-----------------------------------
+c3 = a√c2  (mod p)
+------------------------------------>
+
+The math all still works here-exponentiation is still commutative, and roots can still be computed. It also has an efficiency benefit: working over the integers and choosing large random exponents, the intermediate values (like c2) would be enormous. Working modulo p keeps all of the values between 0 and p-1.
+
+This represents a huge breakthrough: Alice and Bob can communicate a secret message without having exchanged any secret beforehand! They need to agree on p, but note that this isn’t a secret. It just needs to be a large prime. Indeed, everybody can use the same value p.
+
+It’s less obvious at first glance why this is secure. To see this, we need to introduce a new computational assumption.
+The discrete logarithm problem
+Security of the above protocol relies on the fact that Eve, who sees c2 = c1b  (mod p), can’t easily compute Bob’s secret value b. This equation is called a discrete logarithm problem, and in general is very difficult to compute. Specifically, cryptographers define the discrete logarithm problem (DLP) as follows:
+
+Given: prime p, generator g, value ga (mod p)
+Compute: logarithm a
+
+If p is large and g is suitably chosen (certain weak choices for p and g make this problem easy), then this problem is assumed to be computationally intractable. Informally, as p grows solving this problem quickly becomes impractical. There is a naive algorithm to solve the discrete logarithm problem (trying every value for a) but this takes time exponential in the length of p (in bits). There are more sophisticated algorithms that take subexponential time, but no known algorithm whose running time is a polynomial function of the length of p (polynomial time). Thus, in practice we can always choose a reasonably sized value of p that will frustrate all attackers.
+
+It’s important to point out that there is no proof that the discrete log problem is actually computationally difficult. An algorithm could be found tomorrow which computes discrete logs modulo p efficiently. It is merely an assumption (specifically the discrete log assumption) that the problem is difficult. 
+
+There are many such assumptions in cryptography. Typically they are defined in pairs: there is an X problem, paired with X assumption which states that the X problem is computationally intractable.
+
+The discrete log assumption is the most important computational assumption in all of cryptography, and mathematicians and cryptographers have been researching it seriously since the 1970s. At this point it would be very surprising if the assumption turned out to be false in the general case. However, as we will discuss, we already know that quantum computers can (at least in theory) violate the assumption.
+Key exchange protocols
+Shamir’s three-pass protocol introduced above is a huge breakthrough, but has a few drawbacks. Most importantly, it requires three messages to be exchanged sequentially. While very simple, it actually wasn’t the first asymmetric crypto protocol developed publicly. A related protocol is Diffie-Hellman Key Exchange, which is loosely based on a different real-world metaphor: paint mixing. Start with a standard color of paint, say  base  (RGB #9AC). Alice, Bob, and Eve all have a supply of paint in the base color. Alice and Bob each pick a secret color:
+
+ Alice    	(RGB #5CC)
+ Bob              (RGB #DE6)
+
+Now, both of them mix one unit of their secret color with one unit of the base color and send to each other:
+
+Alice -> Bob	(RGB #7BC)
+Bob -> Alice	(RGB #BC9)
+
+Alice and Bob each mix one more unit of their secret color with the two units of paint received from the other party. They will both get the same shared secret color:
+
+Alice/Bob 	(RGB #9CA)
+
+You can also watch this play out in video form.
+
+A key security assumption is that there is no way for Eve to “unmix” the paint to learn Alice or Bob’s secret colors from what is sent. In reality this assumption doesn’t really hold with paint which is a limit of this metaphor. Assuming paint can’t be unmixed though, if Eve tries mixing some of the paint the two sent to each other, she’d end up with too much of the base color and not get the correct secret color for Alice and Bob.
+
+This idea is impractical for a number of reasons, among them that mailing paint is difficult. But it illustrates the idea of mixing secrets to obtain a shared secret. It is conceptually quite close to what is most commonly done in practice.
+Diffie-Hellman key exchange
+Diffie-Hellman key exchange (also sometimes called Diffie-Hellman-Merkle key exchange) is a mathematical version of the paint mixing protocol. Instead of a base paint color, Alice and Bob start with a large prime number p and an integer g < p called the base or generator.
+
+Alice and Bob each then pick a secret random integer less than p and exchange g raised to their secret exponent:
+
+Alice                                                              			Bob
+
+			Agree on g, p (public values)
+	 	<-  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  >
+
+pick random a							pick random b
+					Sa = ga (mod p)
+		---------------------------------------------------------->
+					Sb = gb (mod p)
+		<----------------------------------------------------------	
+
+shared secret:							shared secret:
+(Sb)a (mod p)								(Sa)b (mod p) 
+= (gb)a (mod p)							= (ga)b (mod p)
+= gab (mod p)								= gab (mod p)
+
+Both parties derive the same shared secret, gab (mod p). Eve can observe g, p and ga, gb (the values ga, gb are often called Alice and Bob’s key shares)  but this is not enough for her to derive gab. Note that if she just multiplies the two key shares, she gets ga · gb = ga+b which is not the same as gab.
+The discrete logarithm problem and related assumptions
+It’s relatively straightforward to see that Alice and Bob end up computing the same shared key, since exponentiation is commutative. And given the discrete log assumption, Eve can’t recover the value a from ga. Note however that an adversary doesn’t need to actually compute discrete logarithms to compromise a Diffie-Hellman key exchange. It would suffice to solve an easier problem, the Computational Diffie-Hellman (CDH) problem:
+
+Given: prime p, base g, values ga (mod p), gb (mod p)
+Compute: value gab (mod p)
+
+If an adversary could solve this problem (even without recovering a or b) they could still compute the shared secret. However, this problem is believed to be hard as well.
+
+A third, strictly easier problem, is the Decisional Diffie-Hellman (DDH) problem:
+
+Given: prime p, base g, values ga (mod p), gb (mod p), value h (mod p)
+Decide: is h ≡ gab (mod p) ?
+
+Again, for suitably chosen values this problem is believed to be hard. Which is exactly what we want, as it means that the shared secret Alice and Bob derive is indistinguishable from random to the adversary.
+
+All of these problems are also cast as assumptions. The Discrete Log assumption is that the Discrete Log problem is hard, and so on.
+
+They form a hierarchy:
+
+DDH assumption ⇒ CDH assumption ⇒ Discrete Log assumption
+
+If the DDH assumption is true, then this implies the other two. We can also say in the reverse direction that the DL assumption reduces to the CDH assumption, which reduces to the DDH assumption. This makes DDH the strongest assumption. Similarly the CDH assumption would imply the DL assumption is true. The Discrete Log assumption is the weakest assumption, since it might be true even if the others aren’t.
+
+Again, it’s important to keep the direction of implication/reduction correct. It gets extra confusing because the terminology reverses when talking about problems instead of assumptions. Note that each of the above is a problem (like DDH) plus an assumption stating that the problem is hard. The DDH problem reduces to the CDH problem: given a CDH-problem-solving algorithm, it is easy to solve the DDH problem. A CDH solver also implies a DDH solver. But the CDH assumption reduces to the DDH assumption (note the order has reversed!). If DDH is hard, then CDH must also be hard.
+
+It’s a good exercise to work through the implications and think about how an algorithm that solves the DL problem would easily solve the other two, and a CDH algorithm would also solve DDH.
+
+For Diffie-Hellman to be secure, we need to assume the CDH assumption. Other applications only need the weaker DL assumption, or the stronger DDH assumption.
+
+With asymmetric cryptographic primitives (like DH key exchange) security reduces to relatively simple mathematical assumptions, some of which have been independently studied by mathematicians for decades. With symmetric cryptography, the assumptions are often much less “clean,” and are specific to one primitive like AES or SHA256. Although once again, there is no proof that even the relatively weak Discrete Log assumption is true. Cryptographers believe it due to lack of evidence to the contrary.
+El Gamal encryption
+An issue with Diffie-Hellman exchange is that both parties need to be online to exchange keys. But what if Alice wants to asynchronously send a message to Bob? For example, an email or a written letter.
+
+Observe that Bob can simply publish his key share gb (mod p) in advance. Unlike with a symmetric key, this key can be published in a public directory, like a phone book or Bob’s web server. For this reason it’s called a public key. The only requirement is that Alice gets the correct public key for Bob (for the same reason a middleperson attacker can break security).
+
+This approach leads to the El Gamal encryption scheme (all math is modulo p):
+
+	•	Bob publishes his public key gb in advance. 
+	•	When Alice wants to encrypt a message m for Bob, she picks a random value r
+	•	Alice sends Bob the values gr, m · (gb)r. 
+	•	Bob receives x=gr, y=m · (gb)r  and decrypts m = (xb)-1 · y
+
+Take a minute to convince yourself that Bob’s decryption algorithm will work correctly. Note that the (xb)-1 step in the decryption is a multiplicative inverse mod p (all arithmetic here is done mod p). The multiplicative inverse operation mod p is easy to compute by simply raising to the power p-2 (mod p).
+
+Malleability: Classic El Gamal is simple and elegant and provides semantic security under the DDH assumption. However it is highly malleable: observe that an attacker can replace x=gr in a known ciphertext with (gr)z and it will decrypt to a ciphertext m’=m·g-z. Even easier, an attacker can replace y=m · (gb)r with y’=z·y and this will decrypt to a ciphertext m’=m·z. A digital signature is one way to detect modifications such as these.
+Cramer-Shoup encryption is a more advanced scheme similar to El Gamal but is non-malleable.
+Public-key encryption in general
+El Gamal is an example of a public-key encryption scheme. The value gb is called Bob’s public key because, as noted, he can and should make it as publicly known as possible. We often write this as KB. Bob’s private key is b, which we might write as kB. Using capital and lower-case letters can help save space when describing protocols. Usually it will be clear which key we mean from context.
+
+The term “public key” can be quite confusing, as in the offline world a key is always something we want to keep secret. It might make more sense to call gb Bob’s “public lock” instead. But they are almost always called a public and private key. Sometimes they’re called an encryption key and decryption key.
+
+More generally, a public key encryption scheme must define three algorithms:
+
+	•	KeyGen(λ) →(kpub, kpriv)
+	•	Encrypt(kpub, m) → c
+	•	Decrypt(kpriv, c) → m
+
+This is exactly the same as for symmetric encryption, except there are separate keys for encryption and decryption. This enables anybody to send an encrypted message to Bob (if they know his public key) but only Bob can decrypt them. If Bob is a web server, this is exactly what we want!
+
+The security property we want is also essentially the same as for symmetric encryption: semantic security under adaptive chosen-ciphertext attack. 
+
+The only difference is that we assume the attacker has access to the challenger’s public key. With a public-key encryption scheme, it doesn’t make sense to talk about chosen plaintext attacks. The adversary has the challenger’s public key and can encrypt as many chosen plaintexts as they want themselves (without querying the challenger).
+Hybrid encryption
+In the above presentation of El Gamal, the message m is an integer mod p (as is the ciphertext). This may seem somewhat artificial-who wants to send an integer as a message? In fact, public-key encryption is rarely used to encrypt messages directly. Instead, a random “message” m is usually encrypted, which is only used to derive a key for symmetric authenticated encryption:
+
+	•	Alice chooses a random integer x mod p.
+	•	Alice computes c1 = PublicKeyEncrypt(KB, x)
+	•	Alice computes ksym = H(x)
+	•	Alice encrypts her message m to get c2 = AuthenticatedEncrypt(ksym , m)
+	•	Alice sends c1, c2 to Bob
+
+To decrypt the message:
+	•	Bob decrypts c1 to recompute x = PublicKeyDecrypt(kB, c1)
+	•	Bob re-computes ksym = H(x)
+	•	Bob decrypts c2 to get the message m = AuthenticatedDecrypt(ksym , c2)
+
+This setup is called hybrid encryption since both a public-key scheme and symmetric key scheme are used. There are two primary reasons for this. One, public-key schemes typically assume a message from a finite set, such as integers mod p. Second, while one could encode a message as a series of integers mod p, public-key encryption is very slow compared to symmetric-key encryption. It is much more efficient to use it only to derive a shared key, then use symmetric authenticated encryption to encrypt the actual message (which might be a large file).
+Efficient implementation mod p
+The computation behind Diffie-Hellman and El Gamal might seem very inefficient at first. If a and b are large random integers mod p, then won’t this result in computing an enormous exponentiation? Naively yes, but in practice no for two simple reasons:
+
+	•	The intermediate value can be reduced mod p after every multiplication, so there is no need to ever work with integers that are greater than p2.
+	•	The exponent can be expressed in binary form and exponentiation can be achieved via square-and-multiply. The total number of operations (squarings and multiplications mod p) needed is at most 2·lg p.
+Parameter choices
+While discrete log is still a difficult problem in the multiplicative group mod p, there are algorithms which are much more efficient than exhaustive search. As a result, it is recommended to choose p of at least 1024 bits, with 2048 now considered a standard choice. Choosing p is also not as straightforward as choosing a large random prime; there are several special types of primes to be avoided because they make the discrete log problem easier. Implementers should always use a standard prime and generator, or a standard library for generating parameters.
+
+However, using a standard prime has its own problems due to precomputation attacks. If an adversary wants to attack many targets using the same prime, they can precompute a huge table of values which makes the discrete log problem more efficient for a particular prime. Recent research suggests that the US National Security Agency has been doing this attack for some time and that for a well-funded state-level widely shared 1024-bit primes are vulnerable.
+Implementation using elliptic curves
+Due to the attacks mentioned above requiring large primes, many practical implementations today work in a different algebraic group entirely, based on elliptic curves. The details are beyond the scope of this course and rarely matter to security engineers, but elliptic curves are an alternate way of generating a cyclic group, which is the fundamental mathematical object needed for both Diffie-Hellman and El-Gamal (and Cramer-Shoup and many other schemes).
+
+The best known algorithms for computing discrete logs in elliptic-curve groups are about as inefficient as brute-force, so we can achieve similar security with much smaller parameter sizes. In particular, the US National Institute of Standards and Technology (NIST) guidelines state that 224-bit elliptic curves are as secure as 2048-bit primes. While arithmetic in elliptic curve groups is slightly more complex, this size difference still leads to a huge performance boost in practice, even for 256-bit curves which are the de-facto standard.
+
+For this reason, many modern applications rely on elliptic-curve implementations, including Bitcoin (and most other cryptocurrencies) as well as WhatsApp and many messaging tools. You’ll see acronyms like ECDH, EC-El Gamal and ECDSA which simply mean DH, El Gamal etc. implemented using elliptic curves.
+
+Even more so than with prime-order groups, choosing an elliptic-curve group is quite complex and error-prone so most applications use one of a very small number of popular choices:
+	•	NIST recommends a standard set at different security lengths. Bitcoin uses NIST’s “secp256k1” curve.
+	•	Daniel Bernstein’s Curve25519 is very popular as it offers extremely fast (freely available) implementations in a variety of languages.
+	•	The SafeCurves project provides a list of other modern curves of different sizes.
+

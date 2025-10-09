@@ -1,0 +1,167 @@
+Chapter 3: PKI and certificates
+Suggested reading:
+	•	Security Engineering, section 21.4.5.7
+	•	Clark and van Oorschot Section IV
+More detailed reading:
+	•	CA-Browser forum Baseline requirements
+Bonus reading:
+	•	Timeline of PKI failures on the web
+	•	Certificate Transparency
+	•	Certified Lies: Detecting and Defeating Government Interception Attacks Against SSL
+
+We ignored a basic question for the HTTPS use case: how is a client (Alice) convinced that the key presented by the server (Bob) is correct? Unlike with chat applications such as Signal, the internet has no central key server to give Alice (the client) the key for Bob (the server) . This public key is given directly by Bob to Alice.
+Certificates
+Servers present their public key along with a certificate asserting that it is correct. A certificate is a signed statement that essentially says “Public key KB corresponds to the domain name bob.com.” This certificate is signed by a certificate authority (eq. certification authority) which is assumed to be mutually trusted. It includes other data, such as an expiration date. 
+
+The idea of certificates is quite general and often used in many other PKI (public key infrastructure) setups. For example, some S/MIME applications use certificates to map email encryption keys to email addresses.
+
+Certificates can be viewed as a simplification of the web-of-trust model. Instead of a list of signatures from peers vouching for a key, a certificate is a single signature from a designated authority (or one of several such authorities).
+
+Certificates can also be applied transitively, as with the web-of-trust model. A certificate chain consists of a list of certificates:
+
+Sign(KCA1, “KB belongs to bob.com”)
+Sign(KCA2, “KCA1 belongs to CA1”)
+Sign(KCA3, “KCA2 belongs to CA2”)
+...
+Sign(KCAn, “KCAn-1 belongs to CAn-1”)
+Sign(KCA-Root, “KCAn belongs to CAn”)
+Sign(KCA-Root, “KCA-Root is a Root CA”)
+
+A certificate chain of any length can be validated, as long as it ends in a root CA that the verifier (Alice, in our example) already trusts. This final link in the chain is a root certificate authority, also called a root of trust or trust anchor.
+
+The root CA actually signs a certificate for itself called a self-signed certificate. This may seem pointless because anybody who trusts this certificate already trusts the key, so it adds no new trust information. However, the certificate can still be used to encode some additional data like an expiration date for the certificate.
+
+In practice, certificate chains are rarely more than 2 or 3 certificates long, and most commonly only a single certificate is presented. This is partly for efficiency (more certificates means the chain is bigger and takes longer to validate) but also for security reasons (the more links in the chain the more things which might go wrong).
+Certificates for the web: X.509
+The TLS protocol uses a specific certificate format called X.509 (also used in other protocols such as S/MIME). An X.509 certificate contains a public key, some information about the owner of that public key, and a signature over all this data. The signature is either by the certificate’s own key (a self-signed certificate) or a certificate authority.
+
+X.509 certificates encoded all of this data in a binary format called ASN.1/DER which is notoriously tricky to parse and has led to many critical bugs. You should always use a standard parser and avoid writing your own (likely incomplete) parser.
+
+The easiest way to learn about X.509 certificates is your browser’s certificate viewer:
+
+At any website you visit, you can click on the padlock icon next to the URL and ask to view the site’s certificate. This example is from Chrome but all browsers have some version of this functionality:
+
+
+Chrome offers a “general” and “details” view. The most important field is Common Name which lists the domain for which the certificate is valid. The above example uses *.google.com. This wildcard (‘*’) means the certificate is valid for www.google.com and mail.google.com, though it would not be valid for a.b.google.com or any other domain with more than one subdomain from .google.com.
+
+Besides the name and public key info, all certificates contain a validity period, defined by a “not before” and a “not after” date. The “not before” date generally indicates when the certificate was issued while the “not after” data is viewed as the certificate’s expiration date. Most certificates on the web are valid for anywhere from a few months to 2 years.
+
+Another way to issue a certificate that is valid for multiple domains is the Subject Alternative Name field:
+ 
+This certificate is valid for many properties owned by Google. Subject Alternative Name is one of many X.509 extensions. It is marked not critical which means that if a client doesn’t know the meaning of this extension, it’s safe to ignore it. In this case that would mean the certificate is only valid for the domain listed in the (standard) Common Name field. Other non-critical extensions can encode data such as logos (also safe to ignore).
+
+On the other hand, the Basic Constraints extension is critical:
+
+This extension is included in virtually all web certificates with the same value, “Is not a Certification Authority,” which means this certificate cannot be used to sign other certificates. The fact that it is critical means if any client doesn’t recognize this extension, it should consider the entire certificate invalid.
+Certificate authorities
+Who are the certificate authorities and who decided that they are trustworthy? The short answer is that your browser and/or your operating system come pre-installed with a set of root certificates. By default, all of these root certificates have the ability to issue a certificate for any domain on the web.
+
+Microsoft and Apple maintain their own sets of trusted root CAs for use with their operating systems, while Mozilla maintains yet another set which you can explore online. Chrome’s policy is complicated, the browser uses Microsoft or Apple’s set when running on a Microsoft/Apple system, and Mozilla’s set anywhere else (e.g. Linux). 
+
+Users have the option to manually add/remove to this list but very few do.  To see the list of trusted root certificates in Chrome (as of v.80), go to chrome://settings/certificates and examine the “authorities” tab:
+
+
+You can inspect any of these certificates manually and mark it as distrusted, if you want:
+
+
+Of course, the vast majority of users have no clue what a root certificate is. The only common change to the default list is that some organizations add an “internal” root certificate for their enterprise network. Usually if this happens the IT department pre-installs it; users rarely are bothered to have to configure this themselves.
+Why are there so many certificate authorities?
+As of March 2020, Mozilla’s root certificate set contains 150 unique certificates. This may sound like a lot, but it used to contain many more than that! Why is the list so big? In the early days of TLS , Netscape engineers figured more certificate authorities would be better (more competition) and they didn’t want Netscape to become the single root-of-trust for the Internet. A number of startups rushed into the CA business and Netscape was happy to add them to the trusted set.
+
+Since then there has been massive consolidation in the market. Currently one organization (Identrust) controls about half of the market and just four (Identrust plus Sectigo, Digicert, and GoDaddy) control 95%. This is the result of years of CAs buying each other up. For example, Digicert currently has 29 separate root certificates in the list, created by companies acquired by Digicert such as Thawte and Verisign.
+
+Experience shows that it is difficult to ever remove a root CA from the list, because it causes any certificate signed by that CA to be rejected by browsers and browser makers are hesitant to break compatibility. The only safe way is to wait until old root certificates expire. Even root certificates contain an expiration date, but browsers have accepted root certificates with very long dates (some in the Mozilla list are valid until 2040).
+
+A second major source of bloat in the list is government-controlled CAs. Many governments around the world have decided that certificate issuance should be a government-controlled process and leverage political pressure to get a root certificate added to the lists. For example, Mozilla’s list includes certificates issued by governments including China, Hong Kong, the Netherlands, Spain, Taiwan and Turkey.
+Certificate issuance: domain validation
+When Bob wants to obtain a certificate for his domain bob.com, a CA should verify that he is the legitimate owner before issuing him a certificate. Most certificates on the web use domain validation, which only checks that Bob controls the domain:
+
+Bob											Carol
+(server)										  (CA)
+                               		I’d like a certificate for bob.com
+				My public key is KBob
+           - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ->
+	
+			Show me you control bob.com using nonce X
+           < - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+There are three common ways that Bob can show he controls bob.com. First, there is email-response validation. This is the easiest approach. Carol sends X to a special email address like administrator@bob.com and Bob replies to this email approving the certificate issuance. There are two security problems here: first, an active attacker Mallory might request a certificate, but Bob might respond to the email by mistake. Second, Mallory might be given access to the email address at Bob’s server if Bob doesn’t realize it is a special address. Today 5 standard email addresses are suggested for this purpose: admin@, administrator@, hostmaster@, postmaster@, and webmaster@. In the past many others have been used. A researcher in 2008 was able to obtain a certificate for live.com (Microsoft webmail) by registering for the free webmail address sslcertificates@live.com. A similar demonstration was achieved against Microsoft Live in 2015, suggesting they didn’t learn the first time.
+
+Next, there is web validation which requires Bob to configure his web server to publish the value X at a specific URL such as bob.com/.well-known/pki-validation. This is potentially vulnerable to the same attack as above if servers allow the public to control data at this location, though this is much less common than registering email addresses.
+
+Finally, there is DNS validation in which Bob adds X to the DNS records for bob.com as a TXT record. This is typically the least popular, as many web administrators don’t know how to edit their DNS settings. But it is also least likely to be done by a web administrator by mistake.
+
+There is an inherent flaw in all of these proposals: the CA is checking Bob’s server configuration to verify X, but this has to be done before Bob has a certificate. So the checks inherently take place over an unencrypted channel. A network attacker can potentially spoof any of these methods by simply editing the response sent to the CA that is verifying it. This is potentially fixed for DNS, if the DNSSEC protocol is used (which we’ll discuss later) but otherwise this is a deep flaw in the web PKI model that has never had a satisfactory answer.
+Extended-validation certificates
+Domain-validated (DV) certificates only make a weak claim that the certificate belongs to a certain domain. The other fields in the X.509 certificate, like the business name and country of operation, are not checked by the CA and therefore not trustworthy. Some domain owners want a certificate that makes a stronger claim: not only does this certificate represent the genuine bob.com server, it represents Bob Corporation, a registered business operating in the country of Bobonia. 
+
+Some certificate authorities issue certificates that make such stronger claims called extended validation (EV) certificates. These require manual verification that the site operator is a legally-registered organization at a real-world address. Browsers can then display the company name as well as the domain in the address bar:
+
+vs.
+
+Because PayPal has an extended-validation certificate, the company name and country are displayed alongside the web address. Amazon’s certificate is domain-validated, so only the domain is displayed. It’s telling that even a huge online retailer like Amazon hasn’t bothered to obtain an EV certificate. The idea never saw widespread adoption. CAs charge significantly more for extended validation, and most users don’t notice the difference.
+Rogue certificates
+The root certificate list is large, but we’re largely stuck with it for now. Because any CA can issue a certificate for any domain, the system exhibits weakest link security: an attacker can compromise any CA’s key and then impersonate any domain on the web (or act as an undetected man-in-the-middle). A certificate obtained illegitimately is called a rogue certificate or mis-issued certificate.
+
+This problem was largely ignored for the first 15 years or so of the web and considered a theoretical problem. Then two things happened. First, evidence emerged around 2010 that governments were using rogue certificates to snoop on real web traffic. In this case the certificate is called a compelled certificate because governments might use extrajudicial pressure to force a CA to issue it. The evidence was clear: two researchers went to a trade show and observed several companies selling software and network equipment designed to use compelled certificates to intercept traffic. The existence of commercial tools for this attack suggests governments are either already doing it, or have at least invested in capacity to do it.
+
+Second, a large number of high-profile CA compromises occurred, starting around 2011 with compromises of CAs called DigiNotar and Comodo. The DigiNotar case was particularly notable, as evidence emerged that a rogue certificate for *.google.com was used by the government of Iran to intercept communication to Gmail from thousands of Iranian citizens. Similar to many other countries, the government of Iran effectively controls most ISPs in the country and hence can act as a middleperson in communication between its citizens and servers in foreign countries. The case was also notable in that DigiNotar was the first CA to receive the “death penalty” of being removed from the trusted list. 
+
+The death penalty was possible in this case because DigiNotar was not widely used. Comodo also suffered a serious hack in the same year, but was allowed to remain. Officially, this is because Comodo was more transparent in disclosing and responding to the breach. Unofficially, Comodo was a much more commonly used CA and it would have been very disruptive to remove it. Comodo (and others) are “too big to fail.”
+
+Comodo has been involved in several further breaches since, yet remains trusted. The only other prominent case of the death penalty since Diginotar has been the recent decision to remove trust in Symantec certificates by Google Chrome.
+The future of CAs & Let’s Encrypt
+There remains an official process to apply for inclusion as a root CA with the major vendors. The most important document is the Baseline Requirements maintained by the CA/Browser Forum, an industry consortium with representatives from browser makers and CA companies which sets standards for CA security. For example, the requirements include keeping private keys in special hardware-security modules, regular security audits, and many other best practices. CAs are subject to removal for failure to comply.
+
+Security researchers and engineers have had a generally adversarial relationship with the CA industry for many years. The perception has been that CAs don’t do a good job of security yet charge a huge amount for certificates. DigiCert, as an example, charges US$379/year for a web certificate for a single domain. Higher rates are charged for wildcard certificates or other add-ons.
+
+As a result, a group of security researchers and open-source software advocates collaborated in 2016 to establish Let’s Encrypt, a non-profit CA offering free certificates. The Let’s Encrypt certificate is now a trusted root in all major browsers and has issued millions of certificates. Let’s Encrypt certificates are issued automatically, validating domain ownership using the ACME protocol.
+
+Surprisingly, after some initial hostility the commercial CAs have now made peace with Let’s Encrypt. If certificates are free though, shouldn’t the paid certificate business collapse? It turns out that while many websites which didn’t previously have any certificate (in part due to cost) have now started using HTTPS with a free Let’s Encrypt certificate, few existing customers have switched from paid CAs to the free CA. The thought is that for a few hundred dollars per year, many website operators simply aren’t motivated to switch.
+Certificate transparency
+Why were the first major CA breaches noticed in 2011? Is it the case that CAs had a perfect security track record up until that point? The most likely answer is no, there were probably breaches before then that were simply never noticed. If an attacker uses a rogue certificate to eavesdrop on your connection with bob.com by acting as a man-in-the-middle, how would this be detected? The server has no way of detecting it, as clients are not authenticated by TLS. A client can only detect if they somehow notice that the certificate they received for bob.com is “wrong.” But by definition, a rogue certificate is signed by a trusted CA, so there’s no simple way to know a certificate is “wrong” in the sense of not being legitimately requested by bob.com. 
+
+The infamous Diginotar breach was discovered somewhat by accident by an Iranian user unable to access his Gmail posting data about his connection to a Google online help forum, where others noticed he was being given a certificate not seen elsewhere. Observations like this led to a natural idea: perhaps users around the world should share which certificates they are receiving for different domains, so that they can detect any anomalies or potential rogue certificates.  A project called the EFF SSL Observatory tried to explicitly crawl the Internet from various IP addresses to collect certificates, looking for potential rogue certificates or other abnormalities.
+
+In the years since, the Certificate Transparency (CT) protocol has launched to try to maximize detection of rogue certificates. The basic principles are simple: 
+	•	Any certificate issued by a legitimate CA should be recorded in a public log.
+	•	Clients should not accept certificates that aren’t in a public log.
+	•	Servers should scan the logs to see if rogue certificates for their domain exist.
+
+These public logs are designed to be append-only, using a chained list of Merkle trees storing certificates. That may remind you of the data structure used for blockchains. Indeed CT can be viewed as a public blockchain for recording certificates. This protocol is now enforced by Chrome, and in 2016 it successfully (and quickly) detected a breach of Symantec in which 187 rogue certificates were issued.
+
+Google provides an online interface to search the CT logs for all certificates issued to a given domain, which is designed to detect rogue certificates quickly. It can also be insightful (and somewhat disconcerting) how many certificates end up issued for an individual domain. For nyu.edu, including all subdomains, there have been over 10,000 certificates.
+Certificate revocation
+Certificates may need to be revoked for many reasons-they might be rogue certificates that never should have been issued, the private key might be lost or stolen, or ownership of a domain may transfer. There are three basic approaches to revocation.
+
+The first is certificate revocation lists (CRLs). Certificate authorities sign a list of revoked certificates, and browsers periodically download (from a trusted source) a list of revoked certificates collected by the browser vendor from the various CAs. There are two downsides to this approach: it does not scale efficiently and it does not provide rapid revocation. It doesn’t scale as it requires pushing data to all browsers that is linear in the number of revoked certificates. Techniques like Bloom filters are used to compress this data, but it will always require O(N) bandwidth per client to revoke N certificates. In practice, the inefficiency arises as your browser is forced to download data indicating certificates are revoked for many domains you’ll never actually visit. Second, there is some latency between the time a certificate is requested to be revoked and when your browser actually downloads the latest revocation list. You could check more often, but this would be even less efficient. Chrome uses a version of this called CRLSets. To keep the list small, the Chrome developers don’t always include revocation information unless sites receive a certain amount of traffic. Mozilla uses a similar strategy they call CRLite.
+
+The second approach is the Online Certificate Status Protocol (OCSP). This is a “just-in-time” check for revocation. OCSP-enabled certificates contain (as an X.509 extension) the address of a server which is a designated OCSP responder. When your browser receives this certificate, it queries the responder to ask “Is the certificate with serial number X revoked?” and receives a yes/no answer. This solves the scaling problem of CRLs, as you never query for a certificate unless you need to, and potentially allows for fast revocation. 
+
+One problem with OCSP is that it adds some latency to new HTTPS connections, as the browser should wait for the OCSP response before trusting the connection. The bigger problem is what to do if the OCSP response never comes at all. If the OCSP responder is unavailable, browsers can choose to either fail closed by rejecting the certificate, or fail open by accepting it. Failing closed introduces a reliability problem, in that if an OCSP responder is taken offline none of the domains it services will be reachable. This is generally considered an unacceptable risk. Failing open, on the other hand, means all an attacker has to do is block traffic to the OCSP responder, and then revoked certificates will not be detected.
+
+Failing open was the choice taken in practice, which led to OCSP being described as “like a seat-belt that snaps when you crash. Even though it works 99% of the time, it's worthless because it only works when you don't need it.”
+
+OCSP stapling was introduced to try to fix this problem. With stapling, the OCSP response is actually delivered “in band” directly to the client by a TLS server along with the server’s own certificate. No query is required to an external OCSP responder by clients. The response is signed (and timestamped), so clients can be sure it is authentic.
+
+OCSP stapling is a nice approach, but it requires the TLS server to constantly query an up-to-date OCSP response to send to clients. It leads to a simple question: why not just issue short-lived certificates with a short expiration time? Indeed, this has always been the most reliable means of certificate revocation: expiration. This approach has never caught on for the web, though it has in a sense been re-engineered through OCSP stapling. One positive step is that Let’s Encrypt certificates by default are issued for 90 days, much shorter than the traditional 1-2 year expiration period.
+Pinning
+Revocation can be used to limit the consequences of a rogue certificate once it is detected, but is it possible to prevent it from being used by an attacker in the first place? There have been many proposals over the years, the most successful of which has been key pinning. The idea is for a site to declare that only a small number of CAs are authorized to issue a certificate for its domain. Or, even more aggressively, only a small set of public keys can be used for its domain regardless of which CA has issued a certificate. 
+
+A preloaded list of pinned domains is hard-coded into Chrome and Mozilla browsers. Several very large sites, including Facebook, Google and Twitter, have a pinned list of CAs that are the only ones able to issue certificates for their domains. This makes it extra hard for an attacker to obtain a rogue certificate for these domains, as they need to compromise one of the pinned CAs instead of any CA in the general list. This is a form of preventive security, as opposed to the reactive or detective security provided by Certificate Transparency.
+
+While pinning offers even stronger security, it has never taken off as a mass-market policy. It is cumbersome to set up and most sites are able to live with the reactive security now enabled by CT and revocation.
+The user experience
+At the end of the day, HTTPS and the supporting PKI are supposed to help users be confident that they have a secure connection to a specific domain. Browsers have communicated this information using a variety of graphics over time. Initially, browsers showed warning indicators in the address bar:
+
+Usability studies found very few users noticed these warnings and would access even highly sensitive sites such as online banks despite their presence. It’s easy to conclude that users are ignorant and/or lazy, but this viewpoint is neither fair nor productive.
+
+There is actually a strong argument that users are rational in ignoring security warnings: the vast majority of certificate errors are caused by benign configuration errors and not attacks. The most common causes of error are unknown root CAs, mistakenly using a certificate for one domain for another domain, and using an expired certificate. Certificate warnings can be viewed as “the boy who cried wolf”: after users have seen enough of them, they stop taking them seriously.
+
+Most modern browsers now use modal warnings (taking up the whole screen and not displaying the web site at all) and block access completely for some types of errors:
+
+This Chrome error (for an expired certificate) blocks the website completely, and bypassing it requires a complicated set of steps to add an exception. Some types of errors, such as violating a site’s pinning policy, cannot be bypassed at all:
+
+Different browsers make different decisions on how to warn the user and whether to allow the user to override the warning. You can see what your browser does using the test page badssl.com which simulates many types of error. 
+
+There is always some amount of tension between the goals of preventing users from making mistakes (paternalism) and giving users freedom to decide which warnings to heed. Browsers have drifted in the direction of greater paternalism over time.
